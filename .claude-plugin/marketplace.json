@@ -1,0 +1,17 @@
+{
+  "name": "kube-guard",
+  "description": "Give your Claude Code agent kubectl with a seatbelt: classify and gate every kubectl/helm command before it runs.",
+  "owner": {
+    "name": "Andres Lee",
+    "email": "hola@andreslee.com"
+  },
+  "plugins": [
+    {
+      "name": "kube-guard",
+      "source": "./",
+      "description": "PreToolUse guardrails that classify kubectl/helm by blast radius and allow/ask/deny, with protected contexts and an audit log.",
+      "category": "security",
+      "homepage": "https://github.com/andresleecom/kube-guard"
+    }
+  ]
+}

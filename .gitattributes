@@ -1,0 +1,7 @@
+# Normalize line endings to LF across platforms (hook scripts must stay LF).
+* text=auto eol=lf
+
+# Binary assets must never be line-ending converted.
+*.gif binary
+*.png binary
+*.jpg binary

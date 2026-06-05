@@ -1,0 +1,7 @@
+{
+  "mode": "strict",
+  "protectedContexts": ["prod", "production", "*prod*", "*production*", "*live*"],
+  "protectedNamespaces": ["kube-system", "kube-public", "prod", "production", "*prod*"],
+  "allowExec": false,
+  "allowSecretRead": false
+}

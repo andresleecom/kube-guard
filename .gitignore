@@ -1,0 +1,6 @@
+node_modules/
+.DS_Store
+*.log
+
+# kube-guard dogfooding its own audit log / local settings
+.claude/
