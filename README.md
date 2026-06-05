@@ -73,14 +73,14 @@ It **gates execution**, even when you've turned permissions off:
 
 ## Configuration
 
-Three modes, set via `.claude/kube-guard.config.json` or the `KUBE_GUARD_MODE` env var:
+Config is layered (later wins): plugin defaults → `~/.claude/kube-guard.config.json` (global, every project) → `<project>/.claude/kube-guard.config.json` (per-project) → `KUBE_GUARD_MODE` env var. Protect a production context once, globally, and it applies everywhere. Three modes:
 
 - **`strict`** (default) — destructive & high-risk denied; writes ask; mutations on protected targets denied.
 - **`standard`** — destructive asks (instead of denies); good once you trust the agent.
 - **`audit`** — allow everything but **log every decision** (adopt and measure before you enforce).
 
 ```jsonc
-// .claude/kube-guard.config.json
+// ~/.claude/kube-guard.config.json (global)  or  <project>/.claude/kube-guard.config.json
 {
   "mode": "strict",
   "protectedContexts": ["prod", "production", "*-prod", "*live*"],

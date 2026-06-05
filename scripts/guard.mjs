@@ -5,6 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { homedir } from 'node:os';
 import { readStdin, projectDir } from './lib.mjs';
 import { classify, DEFAULT_CONFIG } from './classify.mjs';
 import { recordDecision } from './audit.mjs';
@@ -32,7 +33,14 @@ function loadConfig(proj) {
   } catch {
     /* use built-in defaults */
   }
-  // per-project override
+  // user-global override (applies across every project)
+  try {
+    const userCfg = join(homedir(), '.claude', 'kube-guard.config.json');
+    if (existsSync(userCfg)) cfg = { ...cfg, ...JSON.parse(readFileSync(userCfg, 'utf8')) };
+  } catch {
+    /* ignore bad user config */
+  }
+  // per-project override (wins over user-global)
   try {
     const local = join(proj, '.claude', 'kube-guard.config.json');
     if (existsSync(local)) cfg = { ...cfg, ...JSON.parse(readFileSync(local, 'utf8')) };

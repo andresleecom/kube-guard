@@ -6,7 +6,7 @@ Help the user understand and operate kube-guard.
 
 ## Steps
 
-1. **Show the active policy.** Read the effective config (built-in defaults are in `${CLAUDE_PLUGIN_ROOT}/config/kube-guard.default.json`, overridden by `.claude/kube-guard.config.json` in the project if present, and the `KUBE_GUARD_MODE` env var). Report:
+1. **Show the active policy.** Read the effective config, applied in this order (later wins): built-in defaults (`${CLAUDE_PLUGIN_ROOT}/config/kube-guard.default.json`) → user-global `~/.claude/kube-guard.config.json` → per-project `.claude/kube-guard.config.json` → `KUBE_GUARD_MODE` env var. Report:
    - Mode (`strict` / `standard` / `audit`)
    - Protected contexts and namespaces
    - `allowExec` / `allowSecretRead`
