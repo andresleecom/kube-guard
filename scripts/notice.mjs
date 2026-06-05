@@ -14,7 +14,6 @@ const SECRET_HINTS = [
 
 try {
   const input = await readStdin();
-  if (input.tool_name !== 'Bash') process.exit(0);
   const cmd = (input.tool_input && input.tool_input.command) || '';
   if (!/\b(?:kubectl|helm)\b/.test(cmd)) process.exit(0);
 

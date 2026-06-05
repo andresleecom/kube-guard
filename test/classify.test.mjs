@@ -78,6 +78,10 @@ test('obfuscation fails closed', () => {
   assert.equal(v('echo kubectl delete ns prod | sh'), 'deny');
   assert.equal(v('bash -c "kubectl delete ns prod"'), 'deny');
   assert.equal(v('kubectl get pods | xargs kubectl delete pod'), 'deny');
+  // PowerShell eval equivalents
+  assert.equal(v('iex "kubectl delete ns prod"'), 'deny');
+  assert.equal(v('Invoke-Expression "kubectl delete ns prod"'), 'deny');
+  assert.equal(v('echo "kubectl delete ns prod" | iex'), 'deny');
 });
 
 test('unknown verbs fail closed to ask', () => {

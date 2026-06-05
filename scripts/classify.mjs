@@ -140,11 +140,12 @@ function tokenize(seg) {
 function isObfuscated(cmd) {
   return (
     /\beval\b/.test(cmd) ||
-    /\b(?:sh|bash|zsh|dash)\s+-c\b/.test(cmd) ||
+    /\b(?:iex|Invoke-Expression)\b/i.test(cmd) || // PowerShell eval
+    /\b(?:sh|bash|zsh|dash|pwsh|powershell)\s+-c(?:ommand)?\b/i.test(cmd) ||
     /\bxargs\b/.test(cmd) ||
     /\$\(/.test(cmd) ||
     /`/.test(cmd) ||
-    /\|\s*(?:sh|bash|zsh|dash)\b/.test(cmd) ||
+    /\|\s*(?:sh|bash|zsh|dash|iex)\b/i.test(cmd) ||
     /\bbase64\b/.test(cmd)
   );
 }

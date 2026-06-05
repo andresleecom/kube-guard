@@ -63,7 +63,8 @@ function resolveRuntime() {
 
 try {
   const input = await readStdin();
-  if (input.tool_name !== 'Bash') process.exit(0); // not our concern -> allow
+  // Tool-agnostic: any shell tool matched in hooks.json (Bash, PowerShell, ...)
+  // carries the command in tool_input.command. Scope is set by the matcher.
   const command = input.tool_input && input.tool_input.command;
   if (typeof command !== 'string' || !/\b(?:kubectl|helm)\b/.test(command)) process.exit(0);
 
