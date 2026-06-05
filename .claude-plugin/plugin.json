@@ -1,6 +1,6 @@
 {
   "name": "kube-guard",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Guardrails for AI agents on Kubernetes: a PreToolUse hook that classifies every kubectl/helm command by blast radius and gates it (allow/ask/deny), with protected contexts, secret-dump blocking, and an audit log.",
   "author": {
     "name": "Andres Lee",
@@ -18,8 +18,5 @@
     "hooks",
     "sre",
     "devops"
-  ],
-  "hooks": "./hooks/hooks.json",
-  "commands": "./commands",
-  "skills": "./skills"
+  ]
 }
