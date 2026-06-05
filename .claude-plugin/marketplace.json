@@ -9,7 +9,7 @@
     {
       "name": "kube-guard",
       "source": "./",
-      "description": "PreToolUse guardrails that classify kubectl/helm by blast radius and allow/ask/deny, with protected contexts and an audit log.",
+      "description": "Context safety + guardrails for AI agents on Kubernetes: per-context policies, safe switching, temporary leases, and allow/ask/deny on every kubectl/helm command.",
       "category": "security",
       "homepage": "https://github.com/andresleecom/kube-guard"
     }

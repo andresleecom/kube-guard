@@ -1,16 +1,10 @@
 #!/usr/bin/env node
-// PreToolUse hook: classify a Bash command's kubectl/helm usage and gate it.
+// PreToolUse hook: classify a shell command's kubectl/helm usage and gate it.
 // FAIL CLOSED: on any internal error we ASK rather than silently allow.
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { homedir } from 'node:os';
-import { readStdin, projectDir } from './lib.mjs';
-import { classify, DEFAULT_CONFIG } from './classify.mjs';
+import { readStdin, projectDir, loadConfig, readLeases, writeLeases, activeLeases } from './lib.mjs';
+import { classify, anyGlob } from './classify.mjs';
 import { recordDecision } from './audit.mjs';
-
-const HERE = dirname(fileURLToPath(import.meta.url));
 
 function emit(decision, reason) {
   process.stdout.write(
@@ -24,37 +18,8 @@ function emit(decision, reason) {
   );
 }
 
-function loadConfig(proj) {
-  let cfg = { ...DEFAULT_CONFIG };
-  // plugin defaults
-  try {
-    const def = JSON.parse(readFileSync(join(HERE, '..', 'config', 'kube-guard.default.json'), 'utf8'));
-    cfg = { ...cfg, ...def };
-  } catch {
-    /* use built-in defaults */
-  }
-  // user-global override (applies across every project)
-  try {
-    const userCfg = join(homedir(), '.claude', 'kube-guard.config.json');
-    if (existsSync(userCfg)) cfg = { ...cfg, ...JSON.parse(readFileSync(userCfg, 'utf8')) };
-  } catch {
-    /* ignore bad user config */
-  }
-  // per-project override (wins over user-global)
-  try {
-    const local = join(proj, '.claude', 'kube-guard.config.json');
-    if (existsSync(local)) cfg = { ...cfg, ...JSON.parse(readFileSync(local, 'utf8')) };
-  } catch {
-    /* ignore bad local config */
-  }
-  // env override for mode
-  const m = process.env.KUBE_GUARD_MODE;
-  if (m === 'strict' || m === 'standard' || m === 'audit') cfg.mode = m;
-  return cfg;
-}
-
-// Best-effort current context/namespace so protected guards work when the
-// command omits --context (the common, most dangerous case).
+// Best-effort current context/namespace so guards work when the command omits
+// --context (the common, most dangerous case).
 function resolveRuntime() {
   const run = (args) => {
     try {
@@ -69,10 +34,10 @@ function resolveRuntime() {
   };
 }
 
+const MUTATIONS = ['WRITE', 'DESTRUCTIVE', 'HIGH_RISK'];
+
 try {
   const input = await readStdin();
-  // Tool-agnostic: any shell tool matched in hooks.json (Bash, PowerShell, ...)
-  // carries the command in tool_input.command. Scope is set by the matcher.
   const command = input.tool_input && input.tool_input.command;
   if (typeof command !== 'string' || !/\b(?:kubectl|helm)\b/.test(command)) process.exit(0);
 
@@ -80,26 +45,47 @@ try {
   const cfg = loadConfig(proj);
   const runtime = resolveRuntime();
 
+  const now = Date.now();
+  const allLeases = readLeases();
+  runtime.leases = activeLeases(allLeases, now);
+
   const result = classify(command, cfg, runtime);
 
   recordDecision(proj, {
     ts: new Date().toISOString(),
-    mode: cfg.mode,
+    defaultMode: cfg.defaultMode,
     verdict: result.verdict,
     klass: result.klass,
+    level: result.segments[0] && result.segments[0].level,
     command,
     reasons: result.reasons,
     context: result.segments[0] && result.segments[0].context,
     namespace: result.segments[0] && result.segments[0].namespace,
+    leased: runtime.leases.length ? true : undefined,
   });
 
-  if (result.verdict === 'allow') process.exit(0); // emit nothing = allow
+  // Consume one-command ("--once") leases that a mutation just used.
+  const usedCtxs = result.segments.filter((s) => MUTATIONS.includes(s.klass)).map((s) => s.context);
+  if (usedCtxs.length) {
+    let changed = false;
+    for (const l of allLeases) {
+      if (l.uses != null && l.uses > 0 && usedCtxs.some((c) => anyGlob([l.context], c))) {
+        l.uses -= 1;
+        changed = true;
+      }
+    }
+    if (changed) {
+      const pruned = allLeases
+        .filter((l) => !(l.uses != null && l.uses <= 0))
+        .filter((l) => !(l.expiresAt && l.expiresAt <= now));
+      writeLeases(pruned);
+    }
+  }
 
-  const reason = `kube-guard (${cfg.mode}): ${result.klass} — ${result.reasons.join('; ')}`;
-  emit(result.verdict, reason);
+  if (result.verdict === 'allow') process.exit(0); // emit nothing = allow
+  emit(result.verdict, `kube-guard: ${result.klass} — ${result.reasons.join('; ')}`);
   process.exit(0);
 } catch {
-  // A guard that errors must not open the door.
   emit('ask', 'kube-guard could not verify this command; asking for confirmation.');
   process.exit(0);
 }

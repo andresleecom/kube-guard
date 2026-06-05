@@ -32,7 +32,9 @@ rather than a public issue.
 
 | Risk | Mitigation |
 |------|------------|
-| Destructive op on production | Verbs are classified; mutations on protected contexts/namespaces are **denied**. Current context is resolved even when `--context` is omitted. |
+| Destructive op on production | Verbs are classified; the command's target context selects a level (`readonly` denies all mutations). Current context is resolved even when `--context` is omitted. |
+| Wrong-cluster execution (multi-cluster) | Per-context policies give each cluster its own posture; `/kctx` confirms switching INTO a guarded cluster. |
+| Standing prod access | No blanket exception: `/klease` grants a scoped, auto-reverting lease (one command or N minutes), logged in the audit trail. Default lease level keeps destructive ops denied. |
 | Evasion via chaining/quoting | The command is split shell-aware (`&& \|\| ; \|`, quotes) and kubectl/helm is detected **anywhere**, not just as the first token. |
 | Evasion via obfuscation | `eval`, `sh -c`, `xargs`, `$(...)`, backticks, `\| sh`, and `base64` around kubectl/helm **fail closed** (deny in strict). Unknown verbs → ask. |
 | Permission-mode bypass | A `deny`/`ask` from the hook applies even under `acceptEdits` / `--dangerously-skip-permissions`. |

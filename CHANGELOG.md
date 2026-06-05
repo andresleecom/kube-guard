@@ -4,6 +4,27 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-06-05
+
+Context safety for multi-cluster work — the headline release.
+
+### Added
+- **Per-context policies (`contextPolicies`)** — map context globs to a posture so
+  each cluster gets the right level: `readonly` (deny mutations, for prod),
+  `strict` (writes ask), `standard` (destructive ask), `audit` (allow + log, for
+  dev/local). The level is chosen by each command's target context. Unlisted
+  contexts use `defaultMode`. Legacy `protectedContexts` still works (→ `readonly`).
+- **`/kctx`** — list contexts with their level and switch safely; confirms when you
+  enter a guarded cluster, free for dev/local. Kills the "wrong cluster" footgun.
+- **`/klease` (context leash)** — temporarily relax a `readonly` context for **one
+  command** or **N minutes**, then it **auto-reverts**. `scripts/lease.mjs` +
+  `scripts/contexts.mjs`.
+
+### Changed
+- Broadened positioning to "context safety + guardrails for AI agents on Kubernetes".
+- `config use-context` is now evaluated against the **target** context (confirm into
+  prod, free into dev) instead of being a generic write.
+
 ## [0.1.4] - 2026-06-05
 
 ### Added
@@ -53,6 +74,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `k8s-safety` skill teaching safe kubectl habits.
 - Table-driven test suite (`node --test`), zero dependencies, cross-platform.
 
+[0.2.0]: https://github.com/andresleecom/kube-guard/releases/tag/v0.2.0
 [0.1.4]: https://github.com/andresleecom/kube-guard/releases/tag/v0.1.4
 [0.1.3]: https://github.com/andresleecom/kube-guard/releases/tag/v0.1.3
 [0.1.2]: https://github.com/andresleecom/kube-guard/releases/tag/v0.1.2

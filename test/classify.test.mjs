@@ -118,6 +118,44 @@ test('quotes protect operators inside arguments', () => {
   assert.equal(r.segments.length, 1);
 });
 
+test('per-context policies pick the level by target context', () => {
+  const cfg = {
+    defaultMode: 'strict',
+    protectedContexts: [],
+    contextPolicies: [
+      { match: ['*prod*', 'do-sfo3-*'], level: 'readonly' },
+      { match: ['*stag*'], level: 'strict' },
+      { match: ['kind-*', '*dev*'], level: 'audit' },
+    ],
+  };
+  assert.equal(classify('kubectl apply -f x.yaml --context do-sfo3-pickrides', cfg).verdict, 'deny');
+  assert.equal(classify('kubectl scale deploy/a --replicas=3 --context prod-eu', cfg).verdict, 'deny');
+  assert.equal(classify('kubectl apply -f x.yaml --context staging', cfg).verdict, 'ask');
+  assert.equal(classify('kubectl apply -f x.yaml --context kind-dev', cfg).verdict, 'allow');
+  assert.equal(classify('kubectl delete pod p --context kind-dev', cfg).verdict, 'allow');
+  assert.equal(classify('kubectl get pods --context kind-dev', cfg).verdict, 'allow');
+});
+
+test('defaultMode applies to unlisted contexts', () => {
+  const cfg = { defaultMode: 'audit', protectedContexts: [], contextPolicies: [{ match: ['*prod*'], level: 'readonly' }] };
+  assert.equal(classify('kubectl delete pod p --context whatever', cfg).verdict, 'allow');
+  assert.equal(classify('kubectl delete pod p --context prod-1', cfg).verdict, 'deny');
+});
+
+test('use-context confirms entering a guarded cluster, free for dev', () => {
+  const cfg = { protectedContexts: [], contextPolicies: [{ match: ['*prod*'], level: 'readonly' }, { match: ['kind-*'], level: 'audit' }] };
+  assert.equal(classify('kubectl config use-context prod-eu', cfg).verdict, 'ask');
+  assert.equal(classify('kubectl config use-context kind-dev', cfg).verdict, 'allow');
+});
+
+test('a lease temporarily relaxes a protected context, then destructive stays denied', () => {
+  const cfg = { protectedContexts: [], contextPolicies: [{ match: ['*prod*'], level: 'readonly' }] };
+  assert.equal(classify('kubectl scale deploy/a --replicas=3 --context prod-eu', cfg).verdict, 'deny');
+  const leased = { leases: [{ context: 'prod-eu', level: 'strict' }] };
+  assert.equal(classify('kubectl scale deploy/a --replicas=3 --context prod-eu', cfg, leased).verdict, 'ask');
+  assert.equal(classify('kubectl delete deploy/a --context prod-eu', cfg, leased).verdict, 'deny');
+});
+
 test('splitSegments respects quotes', () => {
   assert.deepEqual(splitSegments('a && b ; c | d'), ['a', 'b', 'c', 'd']);
   assert.deepEqual(splitSegments('echo "a && b"'), ['echo "a && b"']);

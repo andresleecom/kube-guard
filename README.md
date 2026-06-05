@@ -66,6 +66,8 @@ It **gates execution**, even when you've turned permissions off:
 |---|:--:|:--:|:--:|:--:|
 | Gates command **execution** (allow/ask/deny) | ✅ | ❌ (read-only diag) | ❌ (RBAC only) | ❌ (advisory) |
 | Protected-context / blast-radius guard | ✅ | ❌ | ❌ | ❌ |
+| Per-context policies (multi-cluster) | ✅ | ❌ | ❌ | ❌ |
+| Temporary context leasing (prod for 1 cmd / N min) | ✅ | ❌ | ❌ | ❌ |
 | Blocks secret dumps & exec | ✅ | n/a | ❌ | ❌ |
 | Works in IDE, no in-cluster agent | ✅ | ✅ | ❌ | ✅ |
 | Audit log | ✅ | ❌ | partial | ❌ |
@@ -73,25 +75,47 @@ It **gates execution**, even when you've turned permissions off:
 
 ## Configuration
 
-Config is layered (later wins): plugin defaults → `~/.claude/kube-guard.config.json` (global, every project) → `<project>/.claude/kube-guard.config.json` (per-project) → `KUBE_GUARD_MODE` env var. Protect a production context once, globally, and it applies everywhere. Three modes:
+Config is **layered** (later wins): plugin defaults → `~/.claude/kube-guard.config.json` (global, every project) → `<project>/.claude/kube-guard.config.json` → `KUBE_GUARD_MODE` env. Set a posture once, globally, and it holds everywhere.
 
-- **`strict`** (default) — destructive & high-risk denied; writes ask; mutations on protected targets denied.
-- **`standard`** — destructive asks (instead of denies); good once you trust the agent.
-- **`audit`** — allow everything but **log every decision** (adopt and measure before you enforce).
+### Levels (postures)
+Every command is judged at the level of its **target context** (the `--context` flag, or your live current context):
+
+| Level | Reads | Writes | Destructive | High-risk |
+|---|:--:|:--:|:--:|:--:|
+| `readonly` | allow | **deny** | deny | deny |
+| `strict` *(default)* | allow | ask | deny | deny |
+| `standard` | allow | ask | ask | deny |
+| `audit` | allow | allow | allow | allow *(logged)* |
+
+### Multiple clusters → per-context policies
+Different clusters, different postures. Map context globs to levels:
 
 ```jsonc
-// ~/.claude/kube-guard.config.json (global)  or  <project>/.claude/kube-guard.config.json
+// ~/.claude/kube-guard.config.json
 {
-  "mode": "strict",
-  "protectedContexts": ["prod", "production", "*-prod", "*live*"],
-  "protectedNamespaces": ["kube-system", "prod", "production"],
+  "defaultMode": "strict",
+  "contextPolicies": [
+    { "match": ["*prod*", "*live*", "my-prod-cluster"], "level": "readonly" },
+    { "match": ["*stag*"],                              "level": "strict"   },
+    { "match": ["kind-*", "minikube", "*dev*"],         "level": "audit"    }
+  ],
+  "protectedNamespaces": ["kube-system", "prod", "*prod*"],
   "allowExec": false,        // set true to downgrade exec/cp/run from deny → ask
   "allowSecretRead": false   // set true to downgrade secret dumps → ask
 }
 ```
+Unlisted contexts fall back to `defaultMode`. Legacy `protectedContexts` (a flat list) still works and maps to `readonly`.
 
-Inspect anything with `/kube-guard` (shows active policy + recent decisions) or dry-run a command:
-`node "${CLAUDE_PLUGIN_ROOT}/scripts/explain.mjs" "kubectl delete ns prod"`.
+### Switch & lease (multi-cluster, safely)
+- **`/kctx`** — list contexts with their level and switch safely; kube-guard **confirms when you enter a guarded cluster** and lets dev/local through freely. Solves the "I thought I was on staging but I was on prod" footgun.
+- **`/klease`** — the **context leash**: temporarily relax a `readonly` (prod) cluster for **one command** or **N minutes**, then it **auto-reverts**. Lease only the exception you need:
+  ```bash
+  # prod, but writable (with confirmation) for the next single command:
+  node "$CLAUDE_PLUGIN_ROOT/scripts/lease.mjs" my-prod-cluster --once --level strict
+  ```
+
+Inspect anything with **`/kube-guard`** (active policy + recent decisions), or dry-run a command:
+`node "$CLAUDE_PLUGIN_ROOT/scripts/explain.mjs" "kubectl delete ns prod"`.
 
 ## FAQ
 
@@ -115,7 +139,9 @@ See [SECURITY.md](SECURITY.md) for the threat model. kube-guard is a guardrail, 
 - [ ] Cost / right-sizing recommendations with dollar impact.
 - [ ] Incident loop: triage → fix → PR → postmortem.
 - [ ] `require dry-run + diff` before apply; guard `Write`/`Edit` of dangerous manifests.
-- [ ] Multi-cluster awareness.
+- [ ] Blast-radius preview before destructive ops (count affected resources).
+- [x] Per-context policies & multi-cluster awareness (v0.2.0).
+- [x] Context leasing — temporary, auto-reverting prod access (v0.2.0).
 
 ## Contributing
 

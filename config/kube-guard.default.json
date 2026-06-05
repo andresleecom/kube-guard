@@ -1,5 +1,6 @@
 {
-  "mode": "strict",
+  "defaultMode": "strict",
+  "contextPolicies": [],
   "protectedContexts": ["prod", "production", "*prod*", "*production*", "*live*"],
   "protectedNamespaces": ["kube-system", "kube-public", "prod", "production", "*prod*"],
   "allowExec": false,
