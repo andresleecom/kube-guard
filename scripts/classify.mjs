@@ -238,15 +238,18 @@ function classifyKubectl(args, cfg, runtime) {
   if (klass === 'HIGH_RISK' && execFamily.has(verb) && cfg.allowExec) klass = 'WRITE';
   if (klass === 'HIGH_RISK' && (verb === 'get' || verb === 'config') && cfg.allowSecretRead) klass = 'WRITE';
 
-  // blast-radius flags bump a WRITE toward destructive territory
+  // blast-radius flags only matter for mutating verbs — a selector or -o wide on
+  // a read is harmless, so never label reads as "wide blast radius".
+  const mutating = klass === 'WRITE' || klass === 'DESTRUCTIVE' || klass === 'HIGH_RISK';
   const wide =
-    flags['--all'] !== undefined ||
-    flags['-A'] !== undefined ||
-    flags['--all-namespaces'] !== undefined ||
-    flagVal(flags, '-l', '--selector') !== undefined ||
-    flags['--force'] !== undefined ||
-    flags['--cascade'] !== undefined ||
-    String(flagVal(flags, '--grace-period')) === '0';
+    mutating &&
+    (flags['--all'] !== undefined ||
+      flags['-A'] !== undefined ||
+      flags['--all-namespaces'] !== undefined ||
+      flagVal(flags, '-l', '--selector') !== undefined ||
+      flags['--force'] !== undefined ||
+      flags['--cascade'] !== undefined ||
+      String(flagVal(flags, '--grace-period')) === '0');
 
   return seg(klass, describe(verb, klass, wide), { verb, flags, context, namespace, wide, runtime, cfg });
 }

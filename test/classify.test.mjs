@@ -100,6 +100,18 @@ test('allow flags downgrade high-risk', () => {
   assert.equal(v('kubectl get secret s -o yaml', { allowSecretRead: true }), 'ask');
 });
 
+test('reads never get a wide blast radius label', () => {
+  const r = classify('kubectl get pods -n askonchat -l app=x -o wide');
+  assert.equal(r.verdict, 'allow');
+  assert.ok(!r.reasons.join(' ').toLowerCase().includes('wide'));
+});
+
+test('multi-command: write asks, reads stay clean', () => {
+  const r = classify('kubectl scale deployment a -n a --replicas=2; kubectl get deployment a -n a; kubectl get pods -n a -l app=a -o wide');
+  assert.equal(r.verdict, 'ask');
+  assert.ok(!r.reasons.join(' ').toLowerCase().includes('read) with wide'));
+});
+
 test('quotes protect operators inside arguments', () => {
   const r = classify('kubectl annotate pod x note="a && b"');
   assert.equal(r.verdict, 'ask');
