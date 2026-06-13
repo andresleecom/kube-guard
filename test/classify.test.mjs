@@ -276,3 +276,34 @@ test("issue #4: a typo'd defaultMode coerces to strict", () => {
   const cfg = { protectedContexts: [], contextPolicies: [], defaultMode: 'striict' };
   assert.equal(classify('kubectl delete pod x --context dev1', cfg).verdict, 'deny'); // strict denies destructive
 });
+
+// ---- issue #6: shell-aware parser (PowerShell + splitSegments edge cases) --
+test('issue #6: PowerShell backtick line-continuation is no longer denied', () => {
+  assert.equal(v('kubectl get pods `\n  -n default'), 'allow');
+  assert.equal(v('kubectl get pods `'), 'allow'); // trailing continuation, still a read
+});
+
+test('issue #6: a stray backtick cannot swallow a separator (no latent bypass)', () => {
+  assert.equal(v('a x=`; kubectl delete ns prod'), 'deny'); // ';' must still split
+  assert.deepEqual(splitSegments('a x=`; kubectl delete ns prod'), ['a x=`', 'kubectl delete ns prod']);
+});
+
+test('issue #6: bash backtick command-substitution around kubectl still fails closed', () => {
+  assert.equal(v('echo `kubectl delete ns prod`'), 'deny');
+  assert.equal(v('`kubectl delete ns prod`'), 'deny');
+});
+
+test('issue #6: a # comment is ignored (and cannot smuggle a destructive verb)', () => {
+  assert.equal(v('kubectl get pods # kubectl delete ns prod'), 'allow');
+  assert.equal(v('kubectl delete ns prod # please'), 'deny'); // verb before the comment still counts
+  assert.deepEqual(splitSegments('kubectl get pods # kubectl delete ns prod'), ['kubectl get pods']);
+});
+
+test('issue #6: fd-dup redirect (2>&1) is not split as a background separator', () => {
+  const r = classify('kubectl get pods 2>&1');
+  assert.equal(r.verdict, 'allow');
+  assert.equal(r.segments.length, 1);
+  assert.deepEqual(splitSegments('kubectl get pods 2>&1'), ['kubectl get pods 2>&1']);
+  // a real background '&' still splits:
+  assert.deepEqual(splitSegments('kubectl get pods & echo done'), ['kubectl get pods', 'echo done']);
+});
