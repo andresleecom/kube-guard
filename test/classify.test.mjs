@@ -1,7 +1,7 @@
 // Run: node --test   (zero dependencies — uses the built-in test runner)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { classify, splitSegments } from '../scripts/classify.mjs';
+import { classify, splitSegments, decidingSegment } from '../scripts/classify.mjs';
 
 const v = (cmd, cfg = {}, runtime = {}) => classify(cmd, cfg, runtime).verdict;
 
@@ -323,4 +323,20 @@ test('issue #9: obfuscation against a protected current context is denied even u
 test('issue #9: obfuscation verdicts unchanged for strict/standard', () => {
   assert.equal(v('eval "kubectl delete ns prod"'), 'deny'); // strict default
   assert.equal(v('eval "kubectl delete ns prod"', { mode: 'standard' }), 'ask'); // standard -> ask
+});
+
+// ---- issue #10: audit attribution ------------------------------------------
+test('issue #10: decidingSegment is the segment that set the verdict (not segments[0])', () => {
+  const cfg = { protectedContexts: [], contextPolicies: [{ match: ['*prod*'], level: 'readonly' }, { match: ['kind-*'], level: 'audit' }] };
+  const r = classify('kubectl get pods --context kind-dev && kubectl delete pod x --context prod-eu', cfg);
+  assert.equal(r.verdict, 'deny');
+  const d = decidingSegment(r);
+  assert.equal(d.context, 'prod-eu'); // the deciding (denied) segment, not kind-dev (segments[0])
+  assert.equal(d.verdict, 'deny');
+});
+
+test('issue #10: decidingSegment falls back to the first segment and tolerates empty', () => {
+  const r = classify('kubectl get pods'); // single allow segment
+  assert.equal(decidingSegment(r).verdict, 'allow');
+  assert.equal(decidingSegment({ verdict: 'allow', segments: [] }), null);
 });

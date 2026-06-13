@@ -2,7 +2,7 @@
 // PreToolUse hook: classify a shell command's kubectl/helm usage and gate it.
 // FAIL CLOSED: on any internal error we ASK rather than silently allow.
 import { readStdin, projectDir, loadConfig, readLeases, writeLeases, activeLeases, runKubectl } from './lib.mjs';
-import { classify, consumeLeases, leaseConsumingContexts } from './classify.mjs';
+import { classify, consumeLeases, leaseConsumingContexts, decidingSegment } from './classify.mjs';
 import { recordDecision } from './audit.mjs';
 
 function emit(decision, reason) {
@@ -44,16 +44,19 @@ try {
 
   const result = classify(command, cfg, runtime);
 
+  // Attribute the record to the segment that actually set the verdict (the
+  // strictest), not blindly segments[0] which may be a harmless leading read.
+  const decided = decidingSegment(result) || {};
   recordDecision(proj, {
     ts: new Date().toISOString(),
     defaultMode: cfg.defaultMode,
     verdict: result.verdict,
     klass: result.klass,
-    level: result.segments[0] && result.segments[0].level,
+    level: decided.level,
     command,
     reasons: result.reasons,
-    context: result.segments[0] && result.segments[0].context,
-    namespace: result.segments[0] && result.segments[0].namespace,
+    context: decided.context,
+    namespace: decided.namespace,
     leased: runtime.leases.length ? true : undefined,
   });
 
