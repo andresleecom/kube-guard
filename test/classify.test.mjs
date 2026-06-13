@@ -160,3 +160,39 @@ test('splitSegments respects quotes', () => {
   assert.deepEqual(splitSegments('a && b ; c | d'), ['a', 'b', 'c', 'd']);
   assert.deepEqual(splitSegments('echo "a && b"'), ['echo "a && b"']);
 });
+
+// ---- issue #1: decide kubectl/helm relevance AFTER tokenization ------------
+test('issue #1: intra-word quoting cannot hide the tool name (fail closed)', () => {
+  assert.equal(v("k'ubectl' delete ns prod"), 'deny');
+  assert.equal(v("kube'ctl' delete ns prod"), 'deny');
+  assert.equal(v('k"ubectl" delete ns prod'), 'deny');
+  assert.equal(v("h'elm' uninstall myrelease"), 'deny');
+  assert.equal(v("k'ubectl' --context=production delete ns foo"), 'deny');
+  assert.equal(v("k'ubectl' get pods"), 'allow'); // a quoted read is still a read
+});
+
+test('issue #1: obfuscation with intra-word quoting still fails closed', () => {
+  assert.equal(v(`eval "k'ubectl' delete ns prod"`), 'deny');
+  assert.equal(v(`bash -c "k'ubectl' delete ns prod"`), 'deny');
+});
+
+test('issue #1: merely mentioning kubectl/helm as text is allowed (no invocation)', () => {
+  assert.equal(v(`git commit -m 'fix kubectl helm parsing'`), 'allow');
+  assert.equal(v('echo "run kubectl delete ns prod"'), 'allow');
+  assert.equal(v('echo kubectl delete ns prod'), 'allow'); // echo is a benign leader
+  assert.equal(v('grep kubectl deploy.sh'), 'allow');
+});
+
+test('issue #1: which / command -v kubectl (the prereq check) are allowed', () => {
+  assert.equal(v('which kubectl'), 'allow');
+  assert.equal(v('command -v kubectl'), 'allow');
+  assert.equal(v('type kubectl'), 'allow');
+});
+
+test('issue #1: unrecognized wrappers around kubectl fail closed', () => {
+  assert.equal(v('timeout 5 kubectl delete ns prod'), 'deny');
+  assert.equal(v('parallel kubectl delete pod ::: a b'), 'deny');
+  // a recognized exec wrapper still classifies the REAL verb it runs:
+  assert.equal(v('command kubectl delete ns prod'), 'deny');
+  assert.equal(v('sudo kubectl delete ns prod'), 'deny');
+});
