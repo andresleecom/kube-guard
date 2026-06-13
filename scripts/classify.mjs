@@ -224,6 +224,17 @@ function flagVal(flags, ...names) {
   return undefined;
 }
 
+// Does a positional reference an RBAC kind (Role/ClusterRole and their
+// bindings)? Mutating these grants/revokes privileges — a privilege escalation
+// path. Handles comma lists, name forms and fully-qualified group names.
+function targetsRbac(positional) {
+  return String(positional)
+    .split(',')
+    .some((p) => /^(clusterrolebindings?|rolebindings?|clusterroles?|roles?)([./]|$)/i.test(p.trim()));
+}
+
+const RBAC_MUTATORS = new Set(['create', 'apply', 'patch', 'replace', 'edit', 'set', 'label', 'annotate']);
+
 // ---- segment builders ------------------------------------------------------
 function seg(klass, reason, { context, namespace, runtime, cfg, verb } = {}) {
   const leases = (runtime && runtime.leases) || [];
@@ -266,12 +277,22 @@ function classifyKubectl(args, cfg, runtime) {
     if (sub === 'view') klass = 'HIGH_RISK';
     else if (/^(current-context|get-contexts|get-clusters|get-users)$/.test(sub || '')) klass = 'READ';
     else klass = 'WRITE';
+  } else if (verb === 'auth') {
+    // `auth reconcile` creates/updates RBAC (privilege-granting); `auth can-i`
+    // and `auth whoami` only read.
+    klass = positionals[0] === 'reconcile' ? 'HIGH_RISK' : 'READ';
   } else if (verb === 'get' || verb === 'describe') {
     const out = flagVal(flags, '-o', '--output');
     const touchesSecret = positionals.some((p) => /^secrets?(\/|$)/.test(p));
     const dumpsSecret = verb === 'get' && touchesSecret && out && !/^(name|wide)$/.test(out);
     klass = dumpsSecret ? 'HIGH_RISK' : 'READ';
   }
+
+  // apply --prune deletes live objects not in the applied set -> destructive.
+  if (verb === 'apply' && flags['--prune'] !== undefined) klass = 'DESTRUCTIVE';
+
+  // create/apply/patch/... of an RBAC kind grants or revokes privileges.
+  if (RBAC_MUTATORS.has(verb) && positionals.some(targetsRbac)) klass = 'HIGH_RISK';
 
   if (!klass) return seg('UNKNOWN', `unknown kubectl verb "${verb}"`, { verb, context, namespace, runtime, cfg });
 
