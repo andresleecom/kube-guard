@@ -127,11 +127,46 @@ export function redactSecrets(text) {
   return out;
 }
 
-const KNOWN_MODES = ['strict', 'standard', 'audit'];
+const KNOWN_MODES = ['readonly', 'strict', 'standard', 'audit'];
+
+// Protection arrays accumulate across layers (a project must not be able to
+// silently drop a global protection); everything else is last-wins.
+const ACCUMULATE_KEYS = ['contextPolicies', 'protectedContexts', 'protectedNamespaces'];
+
+function dedupe(arr) {
+  const seen = new Set();
+  const out = [];
+  for (const x of arr) {
+    const key = typeof x === 'string' ? x : JSON.stringify(x);
+    if (!seen.has(key)) {
+      seen.add(key);
+      out.push(x);
+    }
+  }
+  return out;
+}
 
 /**
- * Effective config, layered (later wins):
- * plugin defaults -> ~/.claude/kube-guard.config.json (global) ->
+ * Merge one config `layer` onto `cfg`. Scalars are last-wins; the protection
+ * arrays (contextPolicies/protectedContexts/protectedNamespaces) are CONCATENATED
+ * + de-duped so global protections hold even when a project adds its own. Pure.
+ */
+export function mergeConfigLayer(cfg, layer) {
+  // a layer using the legacy `mode` sets defaultMode for that layer
+  if (layer.mode && layer.defaultMode === undefined) layer.defaultMode = layer.mode;
+  const merged = { ...cfg, ...layer };
+  for (const k of ACCUMULATE_KEYS) {
+    if (Array.isArray(layer[k])) {
+      const base = Array.isArray(cfg[k]) ? cfg[k] : [];
+      merged[k] = dedupe([...base, ...layer[k]]);
+    }
+  }
+  return merged;
+}
+
+/**
+ * Effective config, layered (later wins for scalars; protection arrays
+ * accumulate): plugin defaults -> ~/.claude/kube-guard.config.json (global) ->
  * <project>/.claude/kube-guard.config.json -> KUBE_GUARD_MODE env.
  */
 export function loadConfig(proj) {
@@ -146,10 +181,7 @@ export function loadConfig(proj) {
   const merge = (file) => {
     try {
       if (!existsSync(file)) return;
-      const layer = JSON.parse(readFileSync(file, 'utf8'));
-      // a layer using the legacy `mode` sets defaultMode for that layer
-      if (layer.mode && layer.defaultMode === undefined) layer.defaultMode = layer.mode;
-      cfg = { ...cfg, ...layer };
+      cfg = mergeConfigLayer(cfg, JSON.parse(readFileSync(file, 'utf8')));
     } catch {
       /* ignore malformed config */
     }
