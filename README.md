@@ -7,7 +7,7 @@
 A PreToolUse hook that classifies every `kubectl`/`helm` command by blast radius and **allows, asks, or denies** it before it runs. Reads flow through; production deletes don't.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-black.svg)](LICENSE)
-![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)
+![Version](https://img.shields.io/badge/version-0.2.0-blue.svg)
 ![Zero dependencies](https://img.shields.io/badge/deps-0-brightgreen.svg)
 ![Cross-platform](https://img.shields.io/badge/Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-supported-success.svg)
 
