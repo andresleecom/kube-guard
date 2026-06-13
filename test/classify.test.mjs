@@ -236,3 +236,23 @@ test('issue #2: allowSecretRead downgrades the new secret paths to ask', () => {
   assert.equal(v('kubectl get secret x -oyaml', { allowSecretRead: true }), 'ask');
   assert.equal(v('helm get values myrel', { allowSecretRead: true }), 'ask');
 });
+
+// ---- issue #3: RBAC escalation and apply --prune --------------------------
+test('issue #3: kubectl auth reconcile is a privilege-granting write, not a read', () => {
+  assert.equal(v('kubectl auth reconcile -f rbac.yaml'), 'deny'); // HIGH_RISK
+  assert.equal(v('kubectl auth can-i create pods'), 'allow'); // read
+  assert.equal(v('kubectl auth whoami'), 'allow'); // read
+});
+
+test('issue #3: create/apply of RBAC roles & bindings is escalated', () => {
+  assert.equal(v('kubectl create clusterrolebinding pwn --clusterrole=cluster-admin --user=x'), 'deny');
+  assert.equal(v('kubectl create rolebinding rb --role=admin --user=x'), 'deny');
+  assert.equal(v('kubectl create clusterrole cr --verb=* --resource=*'), 'deny');
+  assert.equal(v('kubectl create configmap cm --from-literal=a=b'), 'ask'); // ordinary write unaffected
+});
+
+test('issue #3: apply --prune is destructive (it deletes live objects)', () => {
+  assert.equal(v('kubectl apply --prune -f . -l app=x'), 'deny');
+  assert.equal(v('kubectl apply --prune --all -f .'), 'deny');
+  assert.equal(v('kubectl apply -f deploy.yaml'), 'ask'); // plain apply still just asks
+});
