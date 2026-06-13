@@ -3,7 +3,7 @@
 // FAIL CLOSED: on any internal error we ASK rather than silently allow.
 import { execFileSync } from 'node:child_process';
 import { readStdin, projectDir, loadConfig, readLeases, writeLeases, activeLeases } from './lib.mjs';
-import { classify, anyGlob } from './classify.mjs';
+import { classify, anyGlob, suggestAlternative } from './classify.mjs';
 import { recordDecision } from './audit.mjs';
 
 function emit(decision, reason) {
@@ -83,7 +83,11 @@ try {
   }
 
   if (result.verdict === 'allow') process.exit(0); // emit nothing = allow
-  emit(result.verdict, `kube-guard: ${result.klass} — ${result.reasons.join('; ')}`);
+  // Attach a deterministic next step so the agent knows HOW to proceed safely.
+  const decided = result.segments.find((s) => s.verdict === result.verdict) || result.segments[0];
+  const tip = suggestAlternative(decided);
+  const base = `kube-guard: ${result.klass} — ${result.reasons.join('; ')}`;
+  emit(result.verdict, tip ? `${base} · try: ${tip}` : base);
   process.exit(0);
 } catch {
   emit('ask', 'kube-guard could not verify this command; asking for confirmation.');

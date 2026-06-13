@@ -1,7 +1,7 @@
 // Run: node --test   (zero dependencies — uses the built-in test runner)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { classify, splitSegments } from '../scripts/classify.mjs';
+import { classify, splitSegments, suggestAlternative } from '../scripts/classify.mjs';
 
 const v = (cmd, cfg = {}, runtime = {}) => classify(cmd, cfg, runtime).verdict;
 
@@ -159,4 +159,16 @@ test('a lease temporarily relaxes a protected context, then destructive stays de
 test('splitSegments respects quotes', () => {
   assert.deepEqual(splitSegments('a && b ; c | d'), ['a', 'b', 'c', 'd']);
   assert.deepEqual(splitSegments('echo "a && b"'), ['echo "a && b"']);
+});
+
+// ---- issue #14: actionable "why denied + safe alternative" -----------------
+test('issue #14: suggestAlternative gives an actionable tip per case', () => {
+  assert.match(suggestAlternative({ klass: 'DESTRUCTIVE', verb: 'delete', level: 'strict' }), /dry-run|klease|scale/i);
+  assert.match(suggestAlternative({ klass: 'WRITE', verb: 'apply', level: 'readonly' }), /klease|non-prod/i);
+  assert.match(suggestAlternative({ klass: 'WRITE', verb: 'apply', level: 'strict' }), /dry-run|diff/i);
+  assert.match(suggestAlternative({ klass: 'HIGH_RISK', verb: 'get' }), /-o name|allowSecretRead/i);
+  assert.match(suggestAlternative({ klass: 'HIGH_RISK', verb: 'exec' }), /allowExec|read/i);
+  assert.match(suggestAlternative({ klass: 'OBFUSCATED' }), /directly|classif/i);
+  assert.equal(suggestAlternative({ klass: 'READ', verb: 'get' }), ''); // nothing to suggest for allows
+  assert.equal(suggestAlternative(null), '');
 });
