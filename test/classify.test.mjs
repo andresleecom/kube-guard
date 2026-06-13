@@ -160,3 +160,23 @@ test('splitSegments respects quotes', () => {
   assert.deepEqual(splitSegments('a && b ; c | d'), ['a', 'b', 'c', 'd']);
   assert.deepEqual(splitSegments('echo "a && b"'), ['echo "a && b"']);
 });
+
+// ---- issue #4: invalid levels must never weaken the guard -----------------
+test("issue #4: a typo'd contextPolicy level coerces to readonly (write stays denied)", () => {
+  const cfg = { protectedContexts: [], contextPolicies: [{ match: ['*prod*'], level: 'readonyl' }] };
+  // WRITE distinguishes readonly (deny) from the buggy fall-through (ask):
+  assert.equal(classify('kubectl scale deploy/a --replicas=3 --context prod-eu', cfg).verdict, 'deny');
+  assert.equal(classify('kubectl apply -f x.yaml --context prod-eu', cfg).verdict, 'deny');
+});
+
+test("issue #4: a typo'd lease level coerces to strict (destructive stays denied)", () => {
+  const cfg = { protectedContexts: [], contextPolicies: [{ match: ['*prod*'], level: 'readonly' }] };
+  const leased = { leases: [{ context: 'prod-eu', level: 'auditt' }] }; // typo for 'audit'
+  assert.equal(classify('kubectl scale deploy/a --replicas=3 --context prod-eu', cfg, leased).verdict, 'ask'); // write asks
+  assert.equal(classify('kubectl delete deploy/a --context prod-eu', cfg, leased).verdict, 'deny'); // destructive denied
+});
+
+test("issue #4: a typo'd defaultMode coerces to strict", () => {
+  const cfg = { protectedContexts: [], contextPolicies: [], defaultMode: 'striict' };
+  assert.equal(classify('kubectl delete pod x --context dev1', cfg).verdict, 'deny'); // strict denies destructive
+});
