@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 // PreToolUse hook: classify a shell command's kubectl/helm usage and gate it.
 // FAIL CLOSED: on any internal error we ASK rather than silently allow.
-import { execFileSync } from 'node:child_process';
-import { readStdin, projectDir, loadConfig, readLeases, writeLeases, activeLeases } from './lib.mjs';
+import { readStdin, projectDir, loadConfig, readLeases, writeLeases, activeLeases, runKubectl } from './lib.mjs';
 import { classify, anyGlob } from './classify.mjs';
 import { recordDecision } from './audit.mjs';
 
@@ -19,18 +18,12 @@ function emit(decision, reason) {
 }
 
 // Best-effort current context/namespace so guards work when the command omits
-// --context (the common, most dangerous case).
+// --context (the common, most dangerous case). runKubectl resolves the binary
+// robustly on Windows so a .cmd/.bat shim can't silently drop this guard.
 function resolveRuntime() {
-  const run = (args) => {
-    try {
-      return execFileSync('kubectl', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 2500 }).trim();
-    } catch {
-      return '';
-    }
-  };
   return {
-    currentContext: run(['config', 'current-context']) || undefined,
-    currentNamespace: run(['config', 'view', '--minify', '-o', 'jsonpath={..namespace}']) || undefined,
+    currentContext: runKubectl(['config', 'current-context'], 2500) || undefined,
+    currentNamespace: runKubectl(['config', 'view', '--minify', '-o', 'jsonpath={..namespace}'], 2500) || undefined,
   };
 }
 
