@@ -228,6 +228,11 @@ function baseName(cmd) {
   return (cmd || '').replace(/\.exe$/i, '').split(/[\\/]/).pop();
 }
 
+// Short flags that take a value and are commonly written "stuck" to it
+// (e.g. -oyaml, -ndefault, -lapp=x). Normalizing them is what stops the
+// `kubectl get secret x -oyaml` secret-dump bypass.
+const SHORT_VALUE_FLAGS = { o: '-o', n: '-n', l: '-l', s: '-s' };
+
 function extractVerbAndArgs(args) {
   const positionals = [];
   const flags = {};
@@ -235,6 +240,12 @@ function extractVerbAndArgs(args) {
   for (let i = 0; i < args.length; i++) {
     const t = args[i];
     if (t.startsWith('-')) {
+      // Split a stuck short flag: -oyaml / -o=yaml / -ndefault -> { '-o': 'yaml' }.
+      const m = !t.startsWith('--') && /^-([onls])(.+)$/.exec(t);
+      if (m) {
+        flags[SHORT_VALUE_FLAGS[m[1]]] = m[2][0] === '=' ? m[2].slice(1) : m[2];
+        continue;
+      }
       const eq = t.indexOf('=');
       if (eq !== -1) flags[t.slice(0, eq)] = t.slice(eq + 1);
       else if (VALUE_FLAGS.has(t)) { flags[t] = args[i + 1]; i++; }
@@ -250,6 +261,15 @@ function extractVerbAndArgs(args) {
 function flagVal(flags, ...names) {
   for (const n of names) if (flags[n] !== undefined) return flags[n];
   return undefined;
+}
+
+// Does a positional reference the Secret resource? kubectl accepts comma-joined
+// lists (secrets,configmaps / configmaps,secrets), name forms (secret/foo) and
+// fully-qualified names (secret.v1.core/foo) — all of which must be caught.
+function touchesSecretResource(positional) {
+  return String(positional)
+    .split(',')
+    .some((p) => /^secrets?([./]|$)/i.test(p.trim()));
 }
 
 // ---- segment builders ------------------------------------------------------
@@ -296,8 +316,12 @@ function classifyKubectl(args, cfg, runtime) {
     else klass = 'WRITE';
   } else if (verb === 'get' || verb === 'describe') {
     const out = flagVal(flags, '-o', '--output');
-    const touchesSecret = positionals.some((p) => /^secrets?(\/|$)/.test(p));
-    const dumpsSecret = verb === 'get' && touchesSecret && out && !/^(name|wide)$/.test(out);
+    const tmpl = flagVal(flags, '--template', '--go-template', '--go-template-file', '--template-file');
+    const touchesSecret = positionals.some(touchesSecretResource);
+    // name/wide only print metadata; any other output (yaml/json/jsonpath/
+    // custom-columns/go-template/...) can reveal the base64 `.data` of a Secret.
+    const exposes = (out !== undefined && !/^(name|wide)$/.test(out)) || tmpl !== undefined;
+    const dumpsSecret = verb === 'get' && touchesSecret && exposes;
     klass = dumpsSecret ? 'HIGH_RISK' : 'READ';
   }
 
@@ -323,7 +347,7 @@ function classifyKubectl(args, cfg, runtime) {
 }
 
 function classifyHelm(args, cfg, runtime) {
-  const { verb, flags } = extractVerbAndArgs(args);
+  const { verb, positionals, flags } = extractVerbAndArgs(args);
   if (!verb) return seg('UNKNOWN', 'helm with no subcommand', { runtime, cfg });
   const context = flagVal(flags, '--kube-context', '--context') || (runtime && runtime.currentContext);
   const namespace = flagVal(flags, '-n', '--namespace') || (runtime && runtime.currentNamespace);
@@ -332,6 +356,14 @@ function classifyHelm(args, cfg, runtime) {
   else if (HELM_WRITE.has(verb)) klass = 'WRITE';
   else if (HELM_READ.has(verb)) klass = 'READ';
   else return seg('UNKNOWN', `unknown helm subcommand "${verb}"`, { verb, context, namespace, runtime, cfg });
+
+  // `helm get manifest|values|all|hooks` prints rendered release contents, which
+  // routinely include Secret `.data` and plaintext credentials from values.yaml.
+  if (verb === 'get' && /^(manifest|values|all|hooks)$/.test(positionals[0] || '')) {
+    klass = cfg.allowSecretRead ? 'WRITE' : 'HIGH_RISK';
+    const reason = klass === 'HIGH_RISK' ? `helm get ${positionals[0]} (high_risk: exposes release secrets)` : `helm get ${positionals[0]} (write: secret read allowed)`;
+    return seg(klass, reason, { verb, context, namespace, runtime, cfg });
+  }
   return seg(klass, `helm ${verb} (${klass.toLowerCase()})`, { verb, context, namespace, runtime, cfg });
 }
 
