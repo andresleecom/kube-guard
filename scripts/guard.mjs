@@ -3,7 +3,7 @@
 // FAIL CLOSED: on any internal error we ASK rather than silently allow.
 import { execFileSync } from 'node:child_process';
 import { readStdin, projectDir, loadConfig, readLeases, writeLeases, activeLeases } from './lib.mjs';
-import { classify, anyGlob } from './classify.mjs';
+import { classify, consumeLeases, leaseConsumingContexts } from './classify.mjs';
 import { recordDecision } from './audit.mjs';
 
 function emit(decision, reason) {
@@ -34,8 +34,6 @@ function resolveRuntime() {
   };
 }
 
-const MUTATIONS = ['WRITE', 'DESTRUCTIVE', 'HIGH_RISK'];
-
 try {
   const input = await readStdin();
   const command = input.tool_input && input.tool_input.command;
@@ -64,23 +62,11 @@ try {
     leased: runtime.leases.length ? true : undefined,
   });
 
-  // Consume one-command ("--once") leases that a mutation just used.
-  const usedCtxs = result.segments.filter((s) => MUTATIONS.includes(s.klass)).map((s) => s.context);
-  if (usedCtxs.length) {
-    let changed = false;
-    for (const l of allLeases) {
-      if (l.uses != null && l.uses > 0 && usedCtxs.some((c) => anyGlob([l.context], c))) {
-        l.uses -= 1;
-        changed = true;
-      }
-    }
-    if (changed) {
-      const pruned = allLeases
-        .filter((l) => !(l.uses != null && l.uses <= 0))
-        .filter((l) => !(l.expiresAt && l.expiresAt <= now));
-      writeLeases(pruned);
-    }
-  }
+  // Consume one-command ("--once") leases — but ONLY for mutations that were not
+  // denied (a denied command never ran, so it must not burn the lease). Also
+  // prunes expired/spent leases unconditionally. Atomic write avoids torn state.
+  const { leases: prunedLeases, changed } = consumeLeases(allLeases, leaseConsumingContexts(result.segments), now);
+  if (changed) writeLeases(prunedLeases);
 
   if (result.verdict === 'allow') process.exit(0); // emit nothing = allow
   emit(result.verdict, `kube-guard: ${result.klass} — ${result.reasons.join('; ')}`);

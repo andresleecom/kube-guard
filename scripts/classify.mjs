@@ -102,6 +102,34 @@ function verdictForLevel(klass, level, nsProtected) {
   }
 }
 
+// ---- lease consumption (pure) ----------------------------------------------
+const MUTATION_KLASSES = new Set(['WRITE', 'DESTRUCTIVE', 'HIGH_RISK']);
+
+// Contexts a one-shot lease may be charged for: a mutation that was NOT denied.
+// A denied command never ran, so it must never burn the user's single-use lease.
+export function leaseConsumingContexts(segments) {
+  return (segments || [])
+    .filter((s) => MUTATION_KLASSES.has(s.klass) && s.verdict !== 'deny')
+    .map((s) => s.context);
+}
+
+// Decrement one-shot leases used by `usedContexts`, then drop spent (uses<=0)
+// and expired (expiresAt<=now) leases. Pure; returns { leases, changed }.
+// Pruning is unconditional so stale time-based leases don't accumulate.
+export function consumeLeases(allLeases, usedContexts, now) {
+  const leases = allLeases || [];
+  let changed = false;
+  for (const l of leases) {
+    if (l.uses != null && l.uses > 0 && (usedContexts || []).some((c) => globMatch(l.context, c))) {
+      l.uses -= 1;
+      changed = true;
+    }
+  }
+  const pruned = leases.filter((l) => !(l.uses != null && l.uses <= 0) && !(l.expiresAt && l.expiresAt <= now));
+  if (pruned.length !== leases.length) changed = true;
+  return { leases: pruned, changed };
+}
+
 // ---- shell parsing ---------------------------------------------------------
 export function splitSegments(cmd) {
   const segs = [];
