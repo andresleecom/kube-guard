@@ -196,3 +196,43 @@ test('issue #1: unrecognized wrappers around kubectl fail closed', () => {
   assert.equal(v('command kubectl delete ns prod'), 'deny');
   assert.equal(v('sudo kubectl delete ns prod'), 'deny');
 });
+
+// ---- issue #2: harden secret-dump detection -------------------------------
+test('issue #2: a stuck -o flag does not evade secret-dump detection', () => {
+  assert.equal(v('kubectl get secret x -oyaml'), 'deny');
+  assert.equal(v('kubectl get secret x -ojson'), 'deny');
+  assert.equal(v('kubectl get secret x -o=yaml'), 'deny');
+  assert.equal(v('kubectl get secret x -o name'), 'allow'); // names only still fine
+  assert.equal(v('kubectl get secret x -owide'), 'allow');
+});
+
+test('issue #2: comma-joined resource lists are caught regardless of order', () => {
+  assert.equal(v('kubectl get configmaps,secrets -o yaml'), 'deny');
+  assert.equal(v('kubectl get secrets,configmaps -o yaml'), 'deny');
+  assert.equal(v('kubectl get cm,secret -o json'), 'deny');
+  assert.equal(v('kubectl get pods,deploys -o yaml'), 'allow'); // no secrets in the list
+});
+
+test('issue #2: fully-qualified secret resource names are caught', () => {
+  assert.equal(v('kubectl get secret.v1.core/db -o yaml'), 'deny');
+  assert.equal(v('kubectl get secrets.v1. -o json'), 'deny');
+});
+
+test('issue #2: go-template / --template secret dumps are caught (no -o flag)', () => {
+  assert.equal(v('kubectl get secret db --template={{.data.password}}'), 'deny');
+  assert.equal(v('kubectl get secret db --go-template={{.data}}'), 'deny');
+  assert.equal(v('kubectl get secret db --go-template-file ./x.tmpl'), 'deny');
+});
+
+test('issue #2: helm get manifest/values/all expose release secrets', () => {
+  assert.equal(v('helm get manifest myrel'), 'deny');
+  assert.equal(v('helm get values myrel --all'), 'deny');
+  assert.equal(v('helm get all myrel'), 'deny');
+  assert.equal(v('helm get notes myrel'), 'allow'); // notes are not secrets
+  assert.equal(v('helm list'), 'allow'); // unchanged
+});
+
+test('issue #2: allowSecretRead downgrades the new secret paths to ask', () => {
+  assert.equal(v('kubectl get secret x -oyaml', { allowSecretRead: true }), 'ask');
+  assert.equal(v('helm get values myrel', { allowSecretRead: true }), 'ask');
+});
