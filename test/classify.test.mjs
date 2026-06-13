@@ -307,3 +307,20 @@ test('issue #6: fd-dup redirect (2>&1) is not split as a background separator', 
   // a real background '&' still splits:
   assert.deepEqual(splitSegments('kubectl get pods & echo done'), ['kubectl get pods', 'echo done']);
 });
+
+// ---- issue #9: obfuscation must stay fail-closed even under audit ----------
+test('issue #9: obfuscation never auto-allows under audit (at least ask)', () => {
+  // audit normally allows everything, but obfuscation is unverifiable -> ask
+  assert.equal(v('eval "kubectl delete ns prod"', { mode: 'audit' }), 'ask');
+  assert.equal(v('echo kubectl delete ns prod | sh', { mode: 'audit' }), 'ask');
+});
+
+test('issue #9: obfuscation against a protected current context is denied even under audit', () => {
+  // the obfuscated segment consults the live context: prod -> readonly -> deny
+  assert.equal(v('eval "kubectl delete ns prod"', { mode: 'audit' }, { currentContext: 'my-prod-cluster' }), 'deny');
+});
+
+test('issue #9: obfuscation verdicts unchanged for strict/standard', () => {
+  assert.equal(v('eval "kubectl delete ns prod"'), 'deny'); // strict default
+  assert.equal(v('eval "kubectl delete ns prod"', { mode: 'standard' }), 'ask'); // standard -> ask
+});

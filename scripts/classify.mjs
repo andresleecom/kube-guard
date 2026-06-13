@@ -91,6 +91,9 @@ export function resolveLevel(context, cfg = {}, leases = []) {
 }
 
 function verdictForLevel(klass, level, nsProtected) {
+  // Unverifiable obfuscation must NEVER auto-allow — not even under audit.
+  // Checked before the audit short-circuit so it stays fail-closed everywhere.
+  if (klass === 'OBFUSCATED') return level === 'strict' || level === 'readonly' ? 'deny' : 'ask';
   if (level === 'audit') return 'allow';
   switch (klass) {
     case 'NONE':
@@ -98,8 +101,6 @@ function verdictForLevel(klass, level, nsProtected) {
       return 'allow';
     case 'HIGH_RISK':
       return 'deny';
-    case 'OBFUSCATED':
-      return level === 'standard' ? 'ask' : 'deny';
     case 'UNKNOWN':
       return 'ask';
     case 'WRITE':
@@ -457,8 +458,11 @@ export function classify(command, config = {}, runtime = {}) {
 
   // Obfuscation: an unverifiable construct AROUND kubectl/helm fails closed.
   // Probe with quotes stripped so eval "k'ubectl' ..." cannot evade detection.
+  // Evaluate against the live context so obfuscation aimed at a protected
+  // (readonly) cluster is denied, not merely asked, even under an audit default.
   if (isObfuscated(command) && mentionsK8s(stripQuotes(command))) {
-    const s = seg('OBFUSCATED', 'kubectl/helm wrapped in an unverifiable construct (eval/subshell/pipe-to-shell)', { runtime, cfg });
+    const context = runtime && runtime.currentContext;
+    const s = seg('OBFUSCATED', 'kubectl/helm wrapped in an unverifiable construct (eval/subshell/pipe-to-shell)', { context, runtime, cfg });
     return { verdict: s.verdict, klass: 'OBFUSCATED', reasons: [s.reason], segments: [s] };
   }
 
