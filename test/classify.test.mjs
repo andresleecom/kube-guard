@@ -1,7 +1,7 @@
 // Run: node --test   (zero dependencies — uses the built-in test runner)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { classify, splitSegments, decidingSegment, suggestAlternative } from '../scripts/classify.mjs';
+import { classify, splitSegments, decidingSegment, suggestAlternative, resourceKind } from '../scripts/classify.mjs';
 
 const v = (cmd, cfg = {}, runtime = {}) => classify(cmd, cfg, runtime).verdict;
 
@@ -397,4 +397,34 @@ test('issue #16: an unlisted namespace imposes nothing (context level applies)',
   const cfg = { protectedContexts: [], protectedNamespaces: [], contextPolicies: [{ match: ['*prod*'], level: 'readonly' }], namespacePolicies: [] };
   assert.equal(classify('kubectl delete pod x -n whatever --context prod-eu', cfg).verdict, 'deny'); // context readonly
   assert.equal(classify('kubectl apply -f x -n whatever --context kind-dev', cfg).verdict, 'ask'); // kind-dev unlisted -> defaultMode strict
+});
+
+// ---- issue #17: per-resource-kind rules (tighten-only) ---------------------
+test('issue #17: resourceKind normalizes name/group/comma forms', () => {
+  assert.equal(resourceKind('deploy/web'), 'deploy');
+  assert.equal(resourceKind('deployment.apps'), 'deployment');
+  assert.equal(resourceKind('Nodes'), 'nodes');
+  assert.equal(resourceKind('--flag'), '');
+  assert.equal(resourceKind(''), '');
+});
+
+test('issue #17: resourceRules tighten the verdict for matching kinds', () => {
+  const cfg = {
+    protectedContexts: [], protectedNamespaces: [], defaultMode: 'standard',
+    resourceRules: [{ kinds: ['node', 'nodes', 'namespace', 'pvc', '*.cattle.io'], verbs: ['delete', 'drain', 'taint'], verdict: 'deny' }],
+  };
+  // standard normally ASKS destructive; the rule forces DENY for these kinds
+  assert.equal(classify('kubectl delete node n1 --context dev', cfg).verdict, 'deny');
+  assert.equal(classify('kubectl drain nodes/n1 --context dev', cfg).verdict, 'deny');
+  // a non-matching kind keeps the level verdict (ask under standard)
+  assert.equal(classify('kubectl delete pod p --context dev', cfg).verdict, 'ask');
+});
+
+test('issue #17: resourceRules only tighten, never loosen', () => {
+  const cfg = {
+    protectedContexts: [], defaultMode: 'strict',
+    resourceRules: [{ kinds: ['cm', 'configmap'], verbs: ['*'], verdict: 'ask' }],
+  };
+  // strict deny must NOT be loosened to ask by a verdict:ask rule
+  assert.equal(classify('kubectl delete cm x --context dev', cfg).verdict, 'deny');
 });

@@ -67,6 +67,28 @@ export function anyGlob(patterns, value) {
   return Array.isArray(patterns) && patterns.some((p) => globMatch(p, value));
 }
 
+// ---- resource rules (optional, tighten-only) -------------------------------
+// Normalize a positional to a bare resource kind: strip the name (deploy/web ->
+// deploy), the api group (deployment.apps -> deployment), and lower-case it.
+export function resourceKind(token) {
+  if (!token || token.startsWith('-')) return '';
+  return String(token).split('/')[0].split('.')[0].toLowerCase();
+}
+
+// Strictest verdict imposed by matching resourceRules for (verb, kinds), or null.
+// A rule { kinds:[globs], verbs:[...|'*'], verdict:'deny'|'ask' } only ever
+// TIGHTENS the level verdict (applied via strictest in seg) — never loosens it.
+export function matchResourceRule(rules, verb, kinds) {
+  let floor = null;
+  for (const r of rules || []) {
+    if (!r || !r.verdict) continue;
+    const verbOk = !Array.isArray(r.verbs) || r.verbs.includes('*') || r.verbs.includes(verb);
+    if (!verbOk) continue;
+    if ((kinds || []).some((k) => anyGlob(r.kinds, k))) floor = strictest(floor || 'allow', r.verdict);
+  }
+  return floor;
+}
+
 // ---- level resolution ------------------------------------------------------
 export const KNOWN_LEVELS = ['readonly', 'strict', 'standard', 'audit'];
 
@@ -356,13 +378,14 @@ function targetsRbac(positional) {
 const RBAC_MUTATORS = new Set(['create', 'apply', 'patch', 'replace', 'edit', 'set', 'label', 'annotate']);
 
 // ---- segment builders ------------------------------------------------------
-function seg(klass, reason, { context, namespace, runtime, cfg, verb } = {}) {
+function seg(klass, reason, { context, namespace, runtime, cfg, verb, verdictFloor } = {}) {
   const leases = (runtime && runtime.leases) || [];
   // Effective posture = strictest of the target context's level and the target
   // namespace's level, so a guarded namespace holds even on a lax context.
   const level = strictestLevel(resolveLevel(context, cfg, leases), resolveNsLevel(namespace, cfg));
   const nsProtected = anyGlob(cfg.protectedNamespaces, namespace);
-  const verdict = verdictForLevel(klass, level, nsProtected);
+  // resourceRules can only tighten: take the strictest of level and floor.
+  const verdict = verdictFloor ? strictest(verdictForLevel(klass, level, nsProtected), verdictFloor) : verdictForLevel(klass, level, nsProtected);
   let r = `${reason} [${level}]`;
   if (nsProtected && (klass === 'WRITE' || klass === 'DESTRUCTIVE')) r += ` protected ns ${namespace}`;
   return { tool: 'kubectl/helm', verb: verb ?? null, klass, verdict, level, context: context ?? null, namespace: namespace ?? null, reason: r };
@@ -444,8 +467,13 @@ function classifyKubectl(args, cfg, runtime) {
       flags['--cascade'] !== undefined ||
       String(flagVal(flags, '--grace-period')) === '0');
 
+  // Optional resourceRules: tighten the verdict for specific resource kinds
+  // (e.g. never delete nodes/namespaces/PVCs/CRDs), evaluated only for mutations.
+  const kinds = mutating ? positionals.flatMap((p) => String(p).split(',')).map(resourceKind).filter(Boolean) : [];
+  const verdictFloor = kinds.length ? matchResourceRule(cfg.resourceRules, verb, kinds) : null;
+
   const base = `kubectl ${verb} (${klass.toLowerCase()})`;
-  return seg(klass, wide ? `${base} wide` : base, { verb, context, namespace, runtime, cfg });
+  return seg(klass, wide ? `${base} wide` : base, { verb, context, namespace, runtime, cfg, verdictFloor });
 }
 
 function classifyHelm(args, cfg, runtime) {
