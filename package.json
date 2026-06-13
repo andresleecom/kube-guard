@@ -1,0 +1,30 @@
+{
+  "name": "kube-guard",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Context safety + guardrails for AI agents on Kubernetes: classify and gate every kubectl/helm command by blast radius.",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "license": "MIT",
+  "author": "Andres Lee <hola@andreslee.com>",
+  "homepage": "https://github.com/andresleecom/kube-guard",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/andresleecom/kube-guard.git"
+  },
+  "keywords": [
+    "kubernetes",
+    "kubectl",
+    "helm",
+    "guardrails",
+    "security",
+    "hooks",
+    "sre",
+    "devops"
+  ]
+}
