@@ -39,7 +39,9 @@ const MUTATIONS = ['WRITE', 'DESTRUCTIVE', 'HIGH_RISK'];
 try {
   const input = await readStdin();
   const command = input.tool_input && input.tool_input.command;
-  if (typeof command !== 'string' || !/\b(?:kubectl|helm)\b/.test(command)) process.exit(0);
+  if (typeof command !== 'string') process.exit(0);
+  // Strip quotes so intra-word quoting (k'ubectl') can't slip past the fast-path.
+  if (!/\b(?:kubectl|helm)\b/.test(command.replace(/['"`]/g, ''))) process.exit(0);
 
   const proj = projectDir(input);
   const cfg = loadConfig(proj);
