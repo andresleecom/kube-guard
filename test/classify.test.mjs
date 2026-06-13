@@ -1,7 +1,7 @@
 // Run: node --test   (zero dependencies — uses the built-in test runner)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { classify, splitSegments, decidingSegment } from '../scripts/classify.mjs';
+import { classify, splitSegments, decidingSegment, suggestAlternative } from '../scripts/classify.mjs';
 
 const v = (cmd, cfg = {}, runtime = {}) => classify(cmd, cfg, runtime).verdict;
 
@@ -359,4 +359,16 @@ test('issue #13: --dry-run=none really applies (no downgrade)', () => {
 test('issue #13: dry-run never downgrades high-risk (exec/secret have no dry-run)', () => {
   assert.equal(v('kubectl get secret s -o yaml --dry-run=client'), 'deny'); // still a secret dump
   assert.equal(v('kubectl run tmp --image=alpine --dry-run=client', { allowExec: false }), 'deny');
+});
+
+// ---- issue #14: actionable "why denied + safe alternative" -----------------
+test('issue #14: suggestAlternative gives an actionable tip per case', () => {
+  assert.match(suggestAlternative({ klass: 'DESTRUCTIVE', verb: 'delete', level: 'strict' }), /dry-run|klease|scale/i);
+  assert.match(suggestAlternative({ klass: 'WRITE', verb: 'apply', level: 'readonly' }), /klease|non-prod/i);
+  assert.match(suggestAlternative({ klass: 'WRITE', verb: 'apply', level: 'strict' }), /dry-run|diff/i);
+  assert.match(suggestAlternative({ klass: 'HIGH_RISK', verb: 'get' }), /-o name|allowSecretRead/i);
+  assert.match(suggestAlternative({ klass: 'HIGH_RISK', verb: 'exec' }), /allowExec|read/i);
+  assert.match(suggestAlternative({ klass: 'OBFUSCATED' }), /directly|classif/i);
+  assert.equal(suggestAlternative({ klass: 'READ', verb: 'get' }), ''); // nothing to suggest for allows
+  assert.equal(suggestAlternative(null), '');
 });
