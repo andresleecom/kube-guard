@@ -1,5 +1,5 @@
 // Shared helpers for kube-guard hooks. Zero dependencies (Node stdlib only).
-import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync, renameSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -149,7 +149,11 @@ export function writeLeases(arr) {
   try {
     const p = leasesPath();
     mkdirSync(dirname(p), { recursive: true });
-    writeFileSync(p, JSON.stringify(arr, null, 2) + '\n', 'utf8');
+    // Write to a temp file and rename: an atomic swap avoids a torn leases.json
+    // when concurrent guard.mjs processes write at the same time.
+    const tmp = `${p}.${process.pid}.tmp`;
+    writeFileSync(tmp, JSON.stringify(arr, null, 2) + '\n', 'utf8');
+    renameSync(tmp, p);
     return true;
   } catch {
     return false;
