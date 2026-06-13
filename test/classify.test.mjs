@@ -340,3 +340,23 @@ test('issue #10: decidingSegment falls back to the first segment and tolerates e
   assert.equal(decidingSegment(r).verdict, 'allow');
   assert.equal(decidingSegment({ verdict: 'allow', segments: [] }), null);
 });
+
+// ---- issue #13: --dry-run awareness ----------------------------------------
+test('issue #13: --dry-run downgrades a mutation to a safe preview (READ)', () => {
+  assert.equal(v('kubectl apply -f x.yaml --dry-run=server'), 'allow');
+  assert.equal(v('kubectl delete pod x --dry-run=client'), 'allow');
+  assert.equal(v('kubectl scale deploy/x --replicas=0 --dry-run=server'), 'allow');
+  assert.equal(v('kubectl delete ns prod --dry-run=server --context prod'), 'allow'); // preview is safe even on prod
+  assert.equal(v('helm upgrade app ./chart --dry-run'), 'allow');
+  assert.equal(v('helm uninstall app --dry-run'), 'allow');
+});
+
+test('issue #13: --dry-run=none really applies (no downgrade)', () => {
+  assert.equal(v('kubectl apply -f x.yaml --dry-run=none'), 'ask');
+  assert.equal(v('kubectl delete pod x --dry-run=none'), 'deny');
+});
+
+test('issue #13: dry-run never downgrades high-risk (exec/secret have no dry-run)', () => {
+  assert.equal(v('kubectl get secret s -o yaml --dry-run=client'), 'deny'); // still a secret dump
+  assert.equal(v('kubectl run tmp --image=alpine --dry-run=client', { allowExec: false }), 'deny');
+});
