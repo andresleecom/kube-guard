@@ -8,6 +8,7 @@
   "plugins": [
     {
       "name": "kube-guard",
+      "version": "0.2.0",
       "source": "./",
       "description": "Context safety + guardrails for AI agents on Kubernetes: per-context policies, safe switching, temporary leases, and allow/ask/deny on every kubectl/helm command.",
       "category": "security",
