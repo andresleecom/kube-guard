@@ -2,7 +2,12 @@
 """Generate assets/demo.gif: an animated terminal demo of kube-guard.
 
 Pure Pillow; status icons are drawn (no emoji fonts -> no tofu).
-Run: python tools/make_demo.py
+Run:  pip install -r tools/requirements.txt  &&  python tools/make_demo.py
+
+NOTE: this is a Windows-oriented authoring tool — it prefers the Consolas fonts
+under C:\\Windows\\Fonts and falls back to DejaVu/the default font elsewhere, so
+the GIF rendered on macOS/Linux will look slightly different. Only the maintainer
+needs to run this; it is not part of the plugin runtime.
 """
 import os
 from PIL import Image, ImageDraw, ImageFont

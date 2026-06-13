@@ -1,0 +1,3 @@
+# Dependencies for tools/make_demo.py (regenerates assets/demo.gif).
+# Install with:  pip install -r tools/requirements.txt
+pillow
