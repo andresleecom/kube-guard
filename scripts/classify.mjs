@@ -279,6 +279,13 @@ function classifyKubectl(args, cfg, runtime) {
   if (klass === 'HIGH_RISK' && execFamily.has(verb) && cfg.allowExec) klass = 'WRITE';
   if (klass === 'HIGH_RISK' && (verb === 'get' || verb === 'config') && cfg.allowSecretRead) klass = 'WRITE';
 
+  // --dry-run=server|client makes a WRITE/DESTRUCTIVE a no-op preview -> READ.
+  // --dry-run=none is the explicit "really do it" value and must NOT downgrade.
+  // HIGH_RISK (exec/cp/secret dumps) is left as-is: those have no safe dry-run.
+  const dryRun = flagVal(flags, '--dry-run');
+  const isDryRun = dryRun !== 'none' && (dryRun === true || dryRun === 'server' || dryRun === 'client' || flags['--server-dry-run'] !== undefined);
+  if (isDryRun && (klass === 'WRITE' || klass === 'DESTRUCTIVE')) klass = 'READ';
+
   const mutating = klass === 'WRITE' || klass === 'DESTRUCTIVE' || klass === 'HIGH_RISK';
   const wide =
     mutating &&
@@ -304,6 +311,9 @@ function classifyHelm(args, cfg, runtime) {
   else if (HELM_WRITE.has(verb)) klass = 'WRITE';
   else if (HELM_READ.has(verb)) klass = 'READ';
   else return seg('UNKNOWN', `unknown helm subcommand "${verb}"`, { verb, context, namespace, runtime, cfg });
+  // helm --dry-run renders the release without applying it -> safe preview.
+  const dry = flagVal(flags, '--dry-run');
+  if ((klass === 'WRITE' || klass === 'DESTRUCTIVE') && dry !== undefined && dry !== 'none') klass = 'READ';
   return seg(klass, `helm ${verb} (${klass.toLowerCase()})`, { verb, context, namespace, runtime, cfg });
 }
 
