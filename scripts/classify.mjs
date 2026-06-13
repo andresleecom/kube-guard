@@ -68,17 +68,26 @@ export function anyGlob(patterns, value) {
 }
 
 // ---- level resolution ------------------------------------------------------
+export const KNOWN_LEVELS = ['readonly', 'strict', 'standard', 'audit'];
+
+// Coerce an unknown/typo'd level to a safe posture so a misspelling can never
+// silently WEAKEN the guard (e.g. a typo'd policy level dropping deny -> ask).
+// Fail closed: the fallback is the strictest posture that fits the source.
+export function coerceLevel(level, fallback = 'strict') {
+  return KNOWN_LEVELS.includes(level) ? level : fallback;
+}
+
 // Returns the posture for a given target context, considering (in order):
 // active leases -> contextPolicies -> legacy protectedContexts -> defaultMode.
 export function resolveLevel(context, cfg = {}, leases = []) {
   for (const l of leases) {
-    if (globMatch(l.context, context)) return l.level || 'strict';
+    if (globMatch(l.context, context)) return coerceLevel(l.level, 'strict');
   }
   for (const p of cfg.contextPolicies || []) {
-    if (anyGlob(p.match, context)) return p.level;
+    if (anyGlob(p.match, context)) return coerceLevel(p.level, 'readonly');
   }
   if (anyGlob(cfg.protectedContexts, context)) return 'readonly';
-  return cfg.defaultMode || cfg.mode || 'strict';
+  return coerceLevel(cfg.defaultMode || cfg.mode, 'strict');
 }
 
 function verdictForLevel(klass, level, nsProtected) {
