@@ -3,8 +3,42 @@ import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync } fr
 import { join, resolve, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { execFileSync } from 'node:child_process';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
+
+/**
+ * Run a read-only `kubectl` command and return its trimmed stdout (''. on any
+ * failure — fail-safe, never throws). Resolves the binary robustly on Windows:
+ * execFile does NOT honor PATHEXT and refuses to spawn .cmd/.bat directly, so a
+ * kubectl installed as kubectl.cmd/.bat (choco/scoop/krew/cloud auth plugins)
+ * would be invisible — silently dropping the current-context guard. We try the
+ * plain .exe first, then fall back to a cmd.exe shell that resolves the shims.
+ * Args are fixed/internal (never user input), so the shell fallback is safe.
+ */
+export function runKubectl(args, timeout = 3000) {
+  const base = { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout };
+  const tryRun = (bin, opts) => {
+    try {
+      return { ok: true, out: execFileSync(bin, args, { ...base, ...opts }).trim() };
+    } catch (e) {
+      return { ok: false, code: e && e.code };
+    }
+  };
+  if (process.platform !== 'win32') {
+    const r = tryRun('kubectl', {});
+    return r.ok ? r.out : '';
+  }
+  let r = tryRun('kubectl.exe', {});
+  if (r.ok) return r.out;
+  // Only fall back when the .exe wasn't found (ENOENT); a real non-zero exit
+  // (e.g. no current-context configured) should not trigger a second spawn.
+  if (r.code === 'ENOENT') {
+    r = tryRun('kubectl', { shell: true });
+    if (r.ok) return r.out;
+  }
+  return '';
+}
 
 /** Read the hook event JSON from stdin. Never throws: returns {} on any problem. */
 export function readStdin() {
