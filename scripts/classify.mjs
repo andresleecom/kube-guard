@@ -343,3 +343,11 @@ export function classify(command, config = {}, runtime = {}) {
   }
   return result;
 }
+
+// The segment responsible for the overall verdict (the strictest one), for an
+// accurate audit record — not blindly segments[0], which may be a harmless read.
+export function decidingSegment(result) {
+  const segs = (result && result.segments) || [];
+  if (!segs.length) return null;
+  return segs.find((s) => s.verdict === result.verdict) || segs[0];
+}
