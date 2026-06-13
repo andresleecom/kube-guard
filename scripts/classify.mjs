@@ -90,6 +90,24 @@ export function resolveLevel(context, cfg = {}, leases = []) {
   return coerceLevel(cfg.defaultMode || cfg.mode, 'strict');
 }
 
+// Postures ordered by strictness; the strictest of two applies (fail closed).
+const LEVEL_RANK = { audit: 0, standard: 1, strict: 2, readonly: 3 };
+export function strictestLevel(a, b) {
+  return (LEVEL_RANK[b] ?? 2) > (LEVEL_RANK[a] ?? 2) ? b : a;
+}
+
+// The level a target NAMESPACE imposes (composed strictest with the context
+// level). namespacePolicies mirror contextPolicies; protectedNamespaces map to
+// readonly; an unlisted namespace imposes nothing ('audit' = no restriction).
+export function resolveNsLevel(namespace, cfg = {}) {
+  if (!namespace) return 'audit';
+  for (const p of cfg.namespacePolicies || []) {
+    if (anyGlob(p.match, namespace)) return p.level;
+  }
+  if (anyGlob(cfg.protectedNamespaces, namespace)) return 'readonly';
+  return 'audit';
+}
+
 function verdictForLevel(klass, level, nsProtected) {
   // Unverifiable obfuscation must NEVER auto-allow — not even under audit.
   // Checked before the audit short-circuit so it stays fail-closed everywhere.
@@ -340,7 +358,9 @@ const RBAC_MUTATORS = new Set(['create', 'apply', 'patch', 'replace', 'edit', 's
 // ---- segment builders ------------------------------------------------------
 function seg(klass, reason, { context, namespace, runtime, cfg, verb } = {}) {
   const leases = (runtime && runtime.leases) || [];
-  const level = resolveLevel(context, cfg, leases);
+  // Effective posture = strictest of the target context's level and the target
+  // namespace's level, so a guarded namespace holds even on a lax context.
+  const level = strictestLevel(resolveLevel(context, cfg, leases), resolveNsLevel(namespace, cfg));
   const nsProtected = anyGlob(cfg.protectedNamespaces, namespace);
   const verdict = verdictForLevel(klass, level, nsProtected);
   let r = `${reason} [${level}]`;

@@ -372,3 +372,29 @@ test('issue #14: suggestAlternative gives an actionable tip per case', () => {
   assert.equal(suggestAlternative({ klass: 'READ', verb: 'get' }), ''); // nothing to suggest for allows
   assert.equal(suggestAlternative(null), '');
 });
+
+// ---- issue #16: per-namespace policies, composed strictest with context ----
+test('issue #16: a namespace policy composes with the context level (strictest wins)', () => {
+  const cfg = {
+    protectedContexts: [], protectedNamespaces: [],
+    contextPolicies: [{ match: ['kind-*'], level: 'audit' }],
+    namespacePolicies: [{ match: ['prod', '*-prod'], level: 'readonly' }],
+  };
+  // audit context but readonly namespace -> readonly wins -> deny
+  assert.equal(classify('kubectl delete pod x -n prod --context kind-dev', cfg).verdict, 'deny');
+  assert.equal(classify('kubectl apply -f x -n prod --context kind-dev', cfg).verdict, 'deny');
+  // dev namespace imposes nothing -> context audit applies -> allow
+  assert.equal(classify('kubectl delete pod x -n dev --context kind-dev', cfg).verdict, 'allow');
+});
+
+test('issue #16: a protected namespace is guarded even under an audit context', () => {
+  const cfg = { protectedContexts: [], contextPolicies: [{ match: ['kind-*'], level: 'audit' }], protectedNamespaces: ['kube-system'] };
+  assert.equal(classify('kubectl delete pod x -n kube-system --context kind-dev', cfg).verdict, 'deny');
+  assert.equal(classify('kubectl get pods -n kube-system --context kind-dev', cfg).verdict, 'allow'); // reads still fine
+});
+
+test('issue #16: an unlisted namespace imposes nothing (context level applies)', () => {
+  const cfg = { protectedContexts: [], protectedNamespaces: [], contextPolicies: [{ match: ['*prod*'], level: 'readonly' }], namespacePolicies: [] };
+  assert.equal(classify('kubectl delete pod x -n whatever --context prod-eu', cfg).verdict, 'deny'); // context readonly
+  assert.equal(classify('kubectl apply -f x -n whatever --context kind-dev', cfg).verdict, 'ask'); // kind-dev unlisted -> defaultMode strict
+});
