@@ -185,12 +185,40 @@ function mentionsK8s(s) {
   return /\b(?:kubectl|helm)\b/.test(s) || /\bkubectl\.exe\b/.test(s) || /\bhelm\.exe\b/.test(s);
 }
 
+// Quoting can split a tool name (k'ubectl' -> kubectl). Strip quotes before any
+// relevance probe done on the RAW string (the tokenizer already strips them).
+function stripQuotes(s) {
+  return (s || '').replace(/['"`]/g, '');
+}
+
+function isK8s(name) {
+  const n = (name || '').toLowerCase();
+  return n === 'kubectl' || n === 'helm';
+}
+
+// Commands that may take 'kubectl'/'helm' as an ARGUMENT without executing it.
+// Lets us tell a benign mention (which/echo/git/grep) from an unknown command
+// that may actually run kubectl (a wrapper) — the latter fails closed.
+const BENIGN_LEADERS = new Set([
+  'which', 'command', 'type', 'whereis', 'whence', 'where',
+  'echo', 'printf', 'print', 'man', 'help', 'info',
+  'cat', 'less', 'more', 'head', 'tail', 'tee',
+  'grep', 'egrep', 'fgrep', 'rg', 'ag', 'awk', 'sed',
+  'git', 'npm', 'npx', 'yarn', 'pnpm', 'make', 'node',
+  'get-command', 'get-help', 'gcm', 'select-string', 'sls', 'write-host', 'write-output',
+]);
+
 function realCommandTokens(tokens) {
   let i = 0;
   while (i < tokens.length) {
     const t = tokens[i];
     if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(t)) { i++; continue; }
-    if (t === 'sudo' || t === 'command' || t === 'time' || t === 'env' || t === '\\') { i++; continue; }
+    if (t === 'sudo' || t === 'time' || t === 'env' || t === '\\') { i++; continue; }
+    if (t === 'command') {
+      // `command -v/-V/-p NAME` only inspects; `command NAME args` runs NAME.
+      if (/^-[vVp]/.test(tokens[i + 1] || '')) break;
+      i++; continue;
+    }
     break;
   }
   return tokens.slice(i);
@@ -315,31 +343,53 @@ export function classify(command, config = {}, runtime = {}) {
   if (typeof command !== 'string' || !command.trim()) {
     return { verdict: 'allow', klass: 'NONE', reasons: ['empty command'], segments: [] };
   }
-  if (!mentionsK8s(command)) {
-    return { verdict: 'allow', klass: 'NONE', reasons: ['no kubectl/helm'], segments: [] };
-  }
 
-  if (isObfuscated(command)) {
+  // Tokenize FIRST so quoting cannot hide the tool name (k'ubectl' -> kubectl).
+  const segTokens = splitSegments(command).map((s) => realCommandTokens(tokenize(s)));
+  const invokesK8s = segTokens.some((toks) => toks.length && isK8s(baseName(toks[0])));
+  const k8sAsArg = segTokens.some((toks) => toks.slice(1).some((t) => isK8s(baseName(t))));
+
+  // Obfuscation: an unverifiable construct AROUND kubectl/helm fails closed.
+  // Probe with quotes stripped so eval "k'ubectl' ..." cannot evade detection.
+  if (isObfuscated(command) && mentionsK8s(stripQuotes(command))) {
     const s = seg('OBFUSCATED', 'kubectl/helm wrapped in an unverifiable construct (eval/subshell/pipe-to-shell)', { runtime, cfg });
     return { verdict: s.verdict, klass: 'OBFUSCATED', reasons: [s.reason], segments: [s] };
   }
 
-  for (const segment of splitSegments(command)) {
-    const tokens = realCommandTokens(tokenize(segment));
-    if (!tokens.length) continue;
-    const name = baseName(tokens[0]);
-    if (name !== 'kubectl' && name !== 'helm') continue;
-    const info = name === 'kubectl' ? classifyKubectl(tokens.slice(1), cfg, runtime) : classifyHelm(tokens.slice(1), cfg, runtime);
+  // kubectl/helm never appear as runnable tokens (only inside quoted strings,
+  // comments, or not at all) -> nothing for us to guard.
+  if (!invokesK8s && !k8sAsArg) {
+    return { verdict: 'allow', klass: 'NONE', reasons: ['no kubectl/helm invocation'], segments: [] };
+  }
+
+  const add = (info) => {
     result.segments.push(info);
     const before = result.verdict;
     result.verdict = strictest(result.verdict, info.verdict);
     result.reasons.push(info.reason);
     if (result.verdict !== before || result.klass === 'NONE') result.klass = info.klass;
+  };
+
+  for (const tokens of segTokens) {
+    if (!tokens.length) continue;
+    const name = baseName(tokens[0]);
+    if (isK8s(name)) {
+      add(name.toLowerCase() === 'kubectl'
+        ? classifyKubectl(tokens.slice(1), cfg, runtime)
+        : classifyHelm(tokens.slice(1), cfg, runtime));
+      continue;
+    }
+    // Leader is not kubectl/helm. Does this segment hand kubectl/helm to an
+    // unrecognized wrapper (timeout/nice/parallel/...)? If so, fail closed.
+    if (tokens.slice(1).some((t) => isK8s(baseName(t))) && !BENIGN_LEADERS.has(name.toLowerCase())) {
+      add(seg('OBFUSCATED', `kubectl/helm run via unrecognized wrapper "${name}"`, { runtime, cfg }));
+    }
+    // else: a benign inspector (which/echo/git/...) merely referencing kubectl.
   }
 
   if (result.segments.length === 0) {
-    const s = seg('OBFUSCATED', 'kubectl/helm present but no parseable invocation', { runtime, cfg });
-    return { verdict: s.verdict, klass: 'OBFUSCATED', reasons: [s.reason], segments: [s] };
+    // kubectl/helm appeared only in benign positions -> allow.
+    return { verdict: 'allow', klass: 'NONE', reasons: ['kubectl/helm referenced but not invoked'], segments: [] };
   }
   return result;
 }
