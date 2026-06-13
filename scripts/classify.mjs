@@ -114,9 +114,18 @@ export function splitSegments(cmd) {
       if (c === q) q = null;
       continue;
     }
-    if (c === '"' || c === "'" || c === '`') {
+    // Only ' and " quote here. A backtick is an escape/line-continuation in
+    // PowerShell (and bash command-substitution is caught as OBFUSCATED), so
+    // treating it as a quote would let a stray ` swallow a real ; | && separator.
+    if (c === '"' || c === "'") {
       q = c;
       cur += c;
+      continue;
+    }
+    // '#' starts a comment (to end of line) when at a word boundary — so a
+    // trailing comment can't smuggle a destructive verb into the segment.
+    if (c === '#' && (i === 0 || /\s/.test(cmd[i - 1]))) {
+      while (i + 1 < cmd.length && cmd[i + 1] !== '\n') i++;
       continue;
     }
     const two = cmd.slice(i, i + 2);
@@ -126,7 +135,14 @@ export function splitSegments(cmd) {
       i++;
       continue;
     }
-    if (c === ';' || c === '|' || c === '\n' || c === '&') {
+    // '&' as a background separator — but NOT when it's part of a redirect
+    // (2>&1, >&2, &>file), which must stay within the same segment.
+    if (c === '&' && cmd[i - 1] !== '>' && cmd[i + 1] !== '>') {
+      segs.push(cur);
+      cur = '';
+      continue;
+    }
+    if (c === ';' || c === '|' || c === '\n') {
       segs.push(cur);
       cur = '';
       continue;
@@ -175,7 +191,6 @@ function isObfuscated(cmd) {
     /\b(?:sh|bash|zsh|dash|pwsh|powershell)\s+-c(?:ommand)?\b/i.test(cmd) ||
     /\bxargs\b/.test(cmd) ||
     /\$\(/.test(cmd) ||
-    /`/.test(cmd) ||
     /\|\s*(?:sh|bash|zsh|dash|iex)\b/i.test(cmd) ||
     /\bbase64\b/.test(cmd)
   );
