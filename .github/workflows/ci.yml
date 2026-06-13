@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: node --test (${{ matrix.os }} · node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node: ['18.x', '20.x', '22.x']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      # Zero dependencies — no install step needed. The classifier is pure and
+      # cross-platform, so we run the suite on every OS the plugin claims.
+      - run: node --test
+
+  manifests:
+    name: validate JSON manifests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+      - name: parse plugin/marketplace/hooks/config JSON
+        run: |
+          for f in .claude-plugin/plugin.json .claude-plugin/marketplace.json hooks/hooks.json config/kube-guard.default.json; do
+            node -e "JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')); console.log('ok:', process.argv[1])" "$f"
+          done
