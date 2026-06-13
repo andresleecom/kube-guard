@@ -520,3 +520,27 @@ export function decidingSegment(result) {
   if (!segs.length) return null;
   return segs.find((s) => s.verdict === result.verdict) || segs[0];
 }
+
+// A deterministic, actionable next step for a blocked segment — steers the agent
+// toward the dry-run/lease/read paths kube-guard already ships, instead of it
+// giving up or retrying obfuscated variants. Returns '' when nothing to suggest.
+export function suggestAlternative(segment) {
+  if (!segment) return '';
+  const { klass, verb, level } = segment;
+  switch (klass) {
+    case 'OBFUSCATED':
+      return 'run the kubectl/helm command directly (no eval, pipe-to-shell, subshell or backticks) so kube-guard can classify it';
+    case 'DESTRUCTIVE':
+      return `preview it with \`--dry-run=server\`${(verb || '').includes('delete') ? ' (or scale to 0 instead of deleting)' : ''}; for a real change on a guarded context use \`/klease <ctx> --once\``;
+    case 'HIGH_RISK':
+      return verb === 'get' || verb === 'config'
+        ? 'fetch names only with `-o name`, or set `allowSecretRead` if you genuinely need the values'
+        : 'exec/cp/port-forward are blocked; set `allowExec` to downgrade to a confirmation, or use a read instead';
+    case 'WRITE':
+      return level === 'readonly'
+        ? 'this context is readonly — run `/klease <ctx> --once --level strict` for a one-command exception, or target a non-prod context'
+        : 'preview with `--dry-run=server` and `kubectl diff` before applying';
+    default:
+      return '';
+  }
+}

@@ -2,7 +2,7 @@
 // PreToolUse hook: classify a shell command's kubectl/helm usage and gate it.
 // FAIL CLOSED: on any internal error we ASK rather than silently allow.
 import { readStdin, projectDir, loadConfig, readLeases, writeLeases, activeLeases, runKubectl } from './lib.mjs';
-import { classify, consumeLeases, leaseConsumingContexts, decidingSegment } from './classify.mjs';
+import { classify, consumeLeases, leaseConsumingContexts, decidingSegment, suggestAlternative } from './classify.mjs';
 import { recordDecision } from './audit.mjs';
 
 function emit(decision, reason) {
@@ -67,7 +67,11 @@ try {
   if (changed) writeLeases(prunedLeases);
 
   if (result.verdict === 'allow') process.exit(0); // emit nothing = allow
-  emit(result.verdict, `kube-guard: ${result.klass} — ${result.reasons.join('; ')}`);
+  // Attach a deterministic next step so the agent knows HOW to proceed safely
+  // (reuse the deciding segment computed above for the audit record).
+  const tip = suggestAlternative(decided);
+  const base = `kube-guard: ${result.klass} — ${result.reasons.join('; ')}`;
+  emit(result.verdict, tip ? `${base} · try: ${tip}` : base);
   process.exit(0);
 } catch {
   emit('ask', 'kube-guard could not verify this command; asking for confirmation.');
