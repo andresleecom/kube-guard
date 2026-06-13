@@ -1,16 +1,9 @@
 #!/usr/bin/env node
 // List kube-contexts with the kube-guard level that applies to each.
-import { execFileSync } from 'node:child_process';
-import { loadConfig, projectDir, readLeases, activeLeases } from './lib.mjs';
+import { loadConfig, projectDir, readLeases, activeLeases, runKubectl } from './lib.mjs';
 import { resolveLevel } from './classify.mjs';
 
-const run = (args) => {
-  try {
-    return execFileSync('kubectl', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 3000 }).trim();
-  } catch {
-    return '';
-  }
-};
+const run = (args) => runKubectl(args);
 
 const cfg = loadConfig(projectDir({}));
 const leases = activeLeases(readLeases(), Date.now());
