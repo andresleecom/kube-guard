@@ -19,6 +19,12 @@ Help the user understand and operate kube-guard.
    ```
    and explain the verdict and why.
 
+4. **If the user asks to `doctor` / validate the setup**, run the health check (read-only):
+   ```
+   node "${CLAUDE_PLUGIN_ROOT}/scripts/doctor.mjs"
+   ```
+   It prints the Node/kubectl status, the effective config and current context's resolved level, active leases, and **validation warnings** for typo'd keys or invalid levels (which would otherwise silently weaken the posture). Surface any `⚠` warnings to the user.
+
 ## Notes
 - `allow` = runs normally · `ask` = you'll get a confirmation prompt · `deny` = blocked (kube-guard explains why to the agent).
 - kube-guard gates `kubectl`/`helm` regardless of permission mode — even with `--dangerously-skip-permissions`, a `deny`/`ask` still applies.

@@ -129,6 +129,52 @@ export function loadConfig(proj) {
   return cfg;
 }
 
+const KNOWN_CONFIG_KEYS = new Set([
+  'mode', 'defaultMode', 'contextPolicies',
+  'protectedContexts', 'protectedNamespaces', 'allowExec', 'allowSecretRead',
+]);
+const KNOWN_LEVELS = ['readonly', 'strict', 'standard', 'audit'];
+
+/**
+ * Validate an (already-merged) config and return human-readable warnings.
+ * A misspelled key or an invalid level is otherwise silently ignored, leaving
+ * the user on a weaker posture than they intended — for a security tool that is
+ * a footgun, so surface it (via `/kube-guard doctor`). Pure; never throws.
+ */
+export function validateConfig(cfg) {
+  if (!cfg || typeof cfg !== 'object') return ['config is not an object'];
+  const warnings = [];
+
+  for (const k of Object.keys(cfg)) {
+    if (!KNOWN_CONFIG_KEYS.has(k)) warnings.push(`unknown config key "${k}" (ignored) — check spelling`);
+  }
+
+  const dm = cfg.defaultMode ?? cfg.mode;
+  if (dm !== undefined && !KNOWN_LEVELS.includes(dm)) {
+    warnings.push(`defaultMode "${dm}" is not one of ${KNOWN_LEVELS.join('/')} — falling back to strict`);
+  }
+
+  for (const key of ['protectedContexts', 'protectedNamespaces']) {
+    if (cfg[key] !== undefined && !Array.isArray(cfg[key])) warnings.push(`${key} must be an array`);
+  }
+  for (const b of ['allowExec', 'allowSecretRead']) {
+    if (cfg[b] !== undefined && typeof cfg[b] !== 'boolean') warnings.push(`${b} must be true/false`);
+  }
+
+  if (cfg.contextPolicies !== undefined) {
+    if (!Array.isArray(cfg.contextPolicies)) {
+      warnings.push('contextPolicies must be an array');
+    } else {
+      cfg.contextPolicies.forEach((p, i) => {
+        if (!p || typeof p !== 'object') { warnings.push(`contextPolicies[${i}] must be an object`); return; }
+        if (!Array.isArray(p.match)) warnings.push(`contextPolicies[${i}].match must be an array of globs`);
+        if (!KNOWN_LEVELS.includes(p.level)) warnings.push(`contextPolicies[${i}].level "${p.level}" is invalid (use ${KNOWN_LEVELS.join('/')})`);
+      });
+    }
+  }
+  return warnings;
+}
+
 // ---- leases: temporarily relax a context's posture (the "context leash") ---
 export function leasesPath() {
   return join(homedir(), '.claude', 'kube-guard', 'leases.json');
