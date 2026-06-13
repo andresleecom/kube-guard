@@ -40,6 +40,18 @@ export function projectDir(input = {}) {
   return resolve(process.env.CLAUDE_PROJECT_DIR || input.cwd || process.cwd());
 }
 
+/** Nearest ancestor containing `.git` (the git repo root), or null if none. */
+export function repoRoot(startDir) {
+  let dir = resolve(startDir || '.');
+  for (let i = 0; i < 64; i++) {
+    if (existsSync(join(dir, '.git'))) return dir;
+    const parent = dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+  return null;
+}
+
 /** Append a JSON line to a file, creating parent dirs. Best-effort, never throws. */
 export function appendJsonl(file, obj) {
   try {
