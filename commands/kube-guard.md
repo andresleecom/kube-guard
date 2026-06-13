@@ -11,7 +11,11 @@ Help the user understand and operate kube-guard.
    - Protected contexts and namespaces
    - `allowExec` / `allowSecretRead`
 
-2. **Show recent decisions.** If `.claude/kube-guard/audit.jsonl` exists, summarize the last ~10 entries (timestamp, verdict, class, command). Highlight any `deny`.
+2. **Show recent decisions.** Prefer the rollup over eyeballing the log:
+   ```
+   node "${CLAUDE_PLUGIN_ROOT}/scripts/audit-query.mjs" --since 24h
+   ```
+   It prints counts by verdict/class, denies by context, and the top denied commands (entries are already redacted). Useful flags: `--deny-only`, `--context <glob>`, `--since 7d`, `--json`. If you just want the raw tail, read the last ~10 lines of `.claude/kube-guard/audit.jsonl` and highlight any `deny`.
 
 3. **If the user named a command to check**, dry-run it through the classifier (no execution):
    ```
