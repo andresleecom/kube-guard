@@ -8,6 +8,7 @@ A PreToolUse hook that classifies every `kubectl`/`helm` command by blast radius
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-black.svg)](LICENSE)
 ![Version](https://img.shields.io/badge/version-0.2.0-blue.svg)
+[![CI](https://github.com/andresleecom/kube-guard/actions/workflows/ci.yml/badge.svg)](https://github.com/andresleecom/kube-guard/actions/workflows/ci.yml)
 ![Zero dependencies](https://img.shields.io/badge/deps-0-brightgreen.svg)
 ![Cross-platform](https://img.shields.io/badge/Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-supported-success.svg)
 
@@ -36,7 +37,14 @@ An AI agent with `kubectl` access is one hallucinated command away from `kubectl
 | **DESTRUCTIVE** | `delete`, `drain`, `taint`, `replace --force`, `helm uninstall` | 🛑 **deny** |
 | **HIGH-RISK** | `exec`, `run`, `cp`, `port-forward`, `config view`, `get secret -o yaml` | 🛑 **deny** |
 
-Plus cross-cutting guards: **protected contexts/namespaces** (anything matching `prod`, `production`, `*-prod`, `kube-system`, …) escalate every mutation to **deny**, and the guard **fails closed** — if it can't verify a command (`eval`, pipe-to-shell, subshells, unknown verbs), it asks or denies rather than guessing.
+Plus cross-cutting guards: **protected contexts/namespaces** (anything matching `prod`, `production`, `*-prod`, `kube-system`, …) escalate every mutation to **deny**, and the guard **fails closed** — if it can't verify a command (`eval`, pipe-to-shell, subshells, intra-word quoting like `k'ubectl'`, unknown verbs), it asks or denies rather than guessing.
+
+A few things the classifier is deliberately careful about:
+
+- **`--dry-run` is a safe preview.** `apply`/`delete`/`scale … --dry-run=server|client` mutate nothing, so they're recognised as no-ops and **allowed** (but `--dry-run=none` really applies, so it isn't).
+- **Secret dumps are hard to sneak past.** `get secret -o yaml` is blocked *and* so are `-oyaml` (no space), comma lists (`secrets,configmaps`), fully-qualified names (`secret.v1.core/x`), `--template`/`--go-template`, and `helm get values/manifest/all`.
+- **RBAC privilege escalation is gated.** `kubectl auth reconcile`, `create clusterrolebinding … --clusterrole=cluster-admin`, and `apply --prune` are escalated, not waved through as ordinary writes.
+- **When it blocks, it explains.** A denied command comes back with the reason *and* a concrete next step (`--dry-run=server`, `/klease`, `-o name`, …) so the agent self-corrects instead of retrying blind.
 
 ```text
 agent → kubectl delete ns prod   →  🛑 DESTRUCTIVE on protected context — denied (logged)
@@ -66,7 +74,8 @@ It **gates execution**, even when you've turned permissions off:
 |---|:--:|:--:|:--:|:--:|
 | Gates command **execution** (allow/ask/deny) | ✅ | ❌ (read-only diag) | ❌ (RBAC only) | ❌ (advisory) |
 | Protected-context / blast-radius guard | ✅ | ❌ | ❌ | ❌ |
-| Per-context policies (multi-cluster) | ✅ | ❌ | ❌ | ❌ |
+| Per-context **and** per-namespace policies | ✅ | ❌ | ❌ | ❌ |
+| Per-resource allow/denylist (never delete nodes/CRDs/…) | ✅ | ❌ | ❌ | ❌ |
 | Temporary context leasing (prod for 1 cmd / N min) | ✅ | ❌ | ❌ | ❌ |
 | Blocks secret dumps & exec | ✅ | n/a | ❌ | ❌ |
 | Works in IDE, no in-cluster agent | ✅ | ✅ | ❌ | ✅ |
@@ -99,12 +108,25 @@ Different clusters, different postures. Map context globs to levels:
     { "match": ["*stag*"],                              "level": "strict"   },
     { "match": ["kind-*", "minikube", "*dev*"],         "level": "audit"    }
   ],
+  // optional: give specific namespaces their own posture (composed strictest
+  // with the context level, so a guarded namespace holds even on a lax cluster)
+  "namespacePolicies": [
+    { "match": ["prod", "*-prod"], "level": "readonly" }
+  ],
+  // optional: tighten-only rules per resource kind (never loosen the verdict)
+  "resourceRules": [
+    { "kinds": ["node", "namespace", "pvc", "*.cattle.io"],
+      "verbs": ["delete", "drain", "taint"], "verdict": "deny" }
+  ],
   "protectedNamespaces": ["kube-system", "prod", "*prod*"],
   "allowExec": false,        // set true to downgrade exec/cp/run from deny → ask
   "allowSecretRead": false   // set true to downgrade secret dumps → ask
 }
 ```
-Unlisted contexts fall back to `defaultMode`. Legacy `protectedContexts` (a flat list) still works and maps to `readonly`.
+Unlisted contexts fall back to `defaultMode`. Config is **accumulated** across layers for the protection arrays (`contextPolicies`/`namespacePolicies`/`protected*`), so a global prod guard can't be silently dropped by a project config. Legacy `protectedContexts` (a flat list) still works and maps to `readonly`. Run **`/kube-guard doctor`** to print the effective config and catch typo'd keys/levels (which would otherwise weaken the posture silently).
+
+- **`namespacePolicies`** — same shape as `contextPolicies`, but matched against the target namespace; the effective posture is the *stricter* of the context level and the namespace level.
+- **`resourceRules`** — `{ kinds, verbs, verdict }` rules that can only **tighten** a verdict (e.g. "never `delete` nodes/namespaces/PVCs/CRDs"), never loosen it. With no rules configured, behaviour is unchanged.
 
 ### Switch & lease (multi-cluster, safely)
 - **`/kctx`** — list contexts with their level and switch safely; kube-guard **confirms when you enter a guarded cluster** and lets dev/local through freely. Solves the "I thought I was on staging but I was on prod" footgun.
@@ -114,7 +136,12 @@ Unlisted contexts fall back to `defaultMode`. Legacy `protectedContexts` (a flat
   node "$CLAUDE_PLUGIN_ROOT/scripts/lease.mjs" my-prod-cluster --once --level strict
   ```
 
-Inspect anything with **`/kube-guard`** (active policy + recent decisions), or dry-run a command:
+Inspect and operate with **`/kube-guard`**:
+- `/kube-guard` — show the active policy and recent decisions.
+- `/kube-guard doctor` — validate the config + install (Node/kubectl, effective config, current context's level, active leases, and warnings for typo'd keys/levels).
+- `/kube-guard summarize` — roll up the audit log (counts by verdict/class, denies by context, top denied commands; supports `--since 24h`, `--deny-only`, `--context <glob>`).
+
+Or dry-run a single command through the classifier without executing it:
 `node "$CLAUDE_PLUGIN_ROOT/scripts/explain.mjs" "kubectl delete ns prod"`.
 
 ## FAQ
@@ -123,7 +150,9 @@ Inspect anything with **`/kube-guard`** (active policy + recent decisions), or d
 
 **What if kube-guard itself errors?** It fails closed: an internal error returns `ask`, never a silent allow.
 
-**Can the agent bypass it?** Obfuscation (`eval`, `| sh`, `$(...)`, base64, unknown verbs) is treated as unverifiable and denied/asked.
+**Can the agent bypass it?** Obfuscation (`eval`, `| sh`, `$(...)`, backtick command-substitution, base64, unknown verbs) is treated as unverifiable and denied/asked — and relevance is decided *after* tokenization, so intra-word quoting (`k'ubectl' delete`) can't hide the tool name either.
+
+**Can I let the agent preview risky changes?** Yes — `--dry-run=server`/`client` is treated as a read-only preview and allowed, even on a `readonly` context. That's the safe way to let it show you a diff before you lease the real change.
 
 **Does it send anything anywhere?** No. Everything is local; the only outbound calls are the kubectl reads you'd run anyway.
 
@@ -142,10 +171,13 @@ See [SECURITY.md](SECURITY.md) for the threat model. kube-guard is a guardrail, 
 - [ ] Blast-radius preview before destructive ops (count affected resources).
 - [x] Per-context policies & multi-cluster awareness (v0.2.0).
 - [x] Context leasing — temporary, auto-reverting prod access (v0.2.0).
+- [x] Per-namespace policies & per-resource-kind rules.
+- [x] `--dry-run` awareness — previews are recognised and allowed (the enabling half of "require dry-run").
+- [x] Config validation + `/kube-guard doctor`; queryable audit log via `/kube-guard summarize`.
 
 ## Contributing
 
-Issues and PRs welcome. The plugin is deliberately small and dependency-free — the classifier (`scripts/classify.mjs`) is pure and covered by `node --test`. Add a failing case to `test/classify.test.mjs` first.
+Issues and PRs welcome. The plugin is deliberately small and dependency-free — the classifier (`scripts/classify.mjs`) is pure and covered by `node --test`, which runs in CI across {Windows, macOS, Linux} × Node {18, 20, 22}. Add a failing case to `test/classify.test.mjs` first. See [CONTRIBUTING.md](CONTRIBUTING.md) for the house rules.
 
 ## License
 
