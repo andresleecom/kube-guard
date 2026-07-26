@@ -11,6 +11,7 @@ A PreToolUse hook that classifies every `kubectl`/`helm` command by blast radius
 [![CI](https://github.com/andresleecom/kube-guard/actions/workflows/ci.yml/badge.svg)](https://github.com/andresleecom/kube-guard/actions/workflows/ci.yml)
 ![Zero dependencies](https://img.shields.io/badge/deps-0-brightgreen.svg)
 ![Cross-platform](https://img.shields.io/badge/Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-supported-success.svg)
+![Clones](https://img.shields.io/badge/dynamic/json?style=flat-square&label=clones&query=%24.total_clones&url=https%3A%2F%2Fraw.githubusercontent.com%2Fandresleecom%2Fandresleecom%2Fmain%2Ftraffic%2Fkube-guard.json)
 
 </div>
 
